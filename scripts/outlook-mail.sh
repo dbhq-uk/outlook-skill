@@ -1072,8 +1072,8 @@ ${existing_body}"
         DOWNLOAD_DIR="$PROJECT_ROOT/inbox"
         mkdir -p "$DOWNLOAD_DIR"
 
-        # Get attachments list
-        attachments=$(api_call GET "/me/messages/$msg_id/attachments?\$select=id,name,size,contentType,contentBytes")
+        # Get attachments list (don't request contentBytes in listing - causes some attachments to be omitted)
+        attachments=$(api_call GET "/me/messages/$msg_id/attachments?\$select=id,name,size,contentType")
 
         count=$(echo "$attachments" | jq -r '.value | length')
         if [ "$count" = "0" ]; then
@@ -1122,18 +1122,10 @@ ${existing_body}"
                 counter=$((counter + 1))
             done
 
-            # Check if contentBytes is included (small attachments)
-            content_bytes=$(echo "$att" | jq -r '.contentBytes // empty')
-
-            if [ -n "$content_bytes" ]; then
-                # Decode base64 content directly
-                echo "$content_bytes" | base64 -d > "$dest_path"
-            else
-                # Fetch raw content for larger attachments
-                curl -s -X GET "${GRAPH_URL}/me/messages/$msg_id/attachments/$att_id/\$value" \
-                    -H "Authorization: Bearer $ACCESS_TOKEN" \
-                    -o "$dest_path"
-            fi
+            # Always fetch via raw content endpoint (contentBytes not requested in listing)
+            curl -s -X GET "${GRAPH_URL}/me/messages/$msg_id/attachments/$att_id/\$value" \
+                -H "Authorization: Bearer $ACCESS_TOKEN" \
+                -o "$dest_path"
 
             # Format size for display
             if [ "$att_size" -lt 1024 ]; then
