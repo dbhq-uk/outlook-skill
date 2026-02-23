@@ -6,6 +6,7 @@ set -e
 CONFIG_DIR="$HOME/.outlook"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 CREDS_FILE="$CONFIG_DIR/credentials.json"
+ID_CACHE_FILE="$CONFIG_DIR/id_cache.json"
 GRAPH_URL="https://graph.microsoft.com/v1.0"
 
 # Check credentials
@@ -85,6 +86,15 @@ api_call() {
     fi
 }
 
+# Cache message IDs from an API response for fast short-ID resolution.
+# Called after every listing command so that resolve_message_id can find
+# messages from any folder (inbox, subfolders, drafts, sent) without
+# expensive API cascading.
+cache_message_ids() {
+    local response="$1"
+    echo "$response" | jq -c '[.value[].id // empty]' > "$ID_CACHE_FILE" 2>/dev/null || true
+}
+
 # Format message for display
 format_message() {
     jq -r '
@@ -109,6 +119,16 @@ format_messages() {
 }
 
 # Resolve short message ID to full ID
+# Strategy: cache-first (instant), then cascade through API endpoints.
+#
+# The cache is populated by every listing command (inbox, folder, drafts, sent,
+# search, etc.), so if you just listed messages from any folder, their full IDs
+# are available without any API call.
+#
+# If cache misses, we cascade through multiple API endpoints to find the
+# message regardless of which folder it's in (inbox, custom subfolder, drafts,
+# or sent items).
+#
 # Usage: full_id=$(resolve_message_id "short_id_or_full_id" "messages|drafts|sentitems")
 resolve_message_id() {
     local msg_id="$1"
@@ -120,27 +140,56 @@ resolve_message_id() {
         return 0
     fi
 
-    # Short ID - need to find the full ID
-    local endpoint
+    local full_id=""
     local search_limit=500
 
-    if [ "$folder" = "drafts" ]; then
-        endpoint="/me/mailFolders/drafts/messages?\$top=$search_limit&\$select=id"
-    elif [ "$folder" = "sentitems" ]; then
-        endpoint="/me/mailFolders/sentitems/messages?\$top=$search_limit&\$select=id&\$orderby=sentDateTime%20desc"
-    else
-        endpoint="/me/messages?\$top=$search_limit&\$select=id&\$orderby=receivedDateTime%20desc"
+    # 1. Check cache first (instant, no API call)
+    #    Cache is populated by listing commands (inbox, folder, drafts, sent, search, etc.)
+    if [ -f "$ID_CACHE_FILE" ]; then
+        full_id=$(jq -r ".[] | select(endswith(\"$msg_id\"))" "$ID_CACHE_FILE" 2>/dev/null | head -1)
+        if [ -n "$full_id" ]; then
+            echo "$full_id"
+            return 0
+        fi
     fi
 
-    local full_id
-    full_id=$(api_call GET "$endpoint" | jq -r ".value[].id | select(endswith(\"$msg_id\"))" | head -1)
+    # 2. Search the hinted folder first
+    case "$folder" in
+        drafts)
+            full_id=$(api_call GET "/me/mailFolders/drafts/messages?\$top=$search_limit&\$select=id" | jq -r ".value[].id | select(endswith(\"$msg_id\"))" | head -1)
+            ;;
+        sentitems)
+            full_id=$(api_call GET "/me/mailFolders/sentitems/messages?\$top=$search_limit&\$select=id" | jq -r ".value[].id | select(endswith(\"$msg_id\"))" | head -1)
+            ;;
+        *)
+            full_id=$(api_call GET "/me/messages?\$top=$search_limit&\$select=id" | jq -r ".value[].id | select(endswith(\"$msg_id\"))" | head -1)
+            ;;
+    esac
 
-    if [ -z "$full_id" ]; then
-        return 1
+    if [ -n "$full_id" ]; then
+        echo "$full_id"
+        return 0
     fi
 
-    echo "$full_id"
-    return 0
+    # 3. Cascade: search other locations the hinted folder wouldn't cover
+    #    /me/messages does NOT include drafts, so always cascade to drafts.
+    #    Drafts/sentitems hints don't cover all-mail, so cascade to /me/messages.
+    if [ "$folder" != "drafts" ]; then
+        full_id=$(api_call GET "/me/mailFolders/drafts/messages?\$top=200&\$select=id" | jq -r ".value[].id | select(endswith(\"$msg_id\"))" | head -1)
+        if [ -n "$full_id" ]; then echo "$full_id"; return 0; fi
+    fi
+
+    if [ "$folder" != "sentitems" ]; then
+        full_id=$(api_call GET "/me/mailFolders/sentitems/messages?\$top=$search_limit&\$select=id" | jq -r ".value[].id | select(endswith(\"$msg_id\"))" | head -1)
+        if [ -n "$full_id" ]; then echo "$full_id"; return 0; fi
+    fi
+
+    if [ "$folder" = "drafts" ] || [ "$folder" = "sentitems" ]; then
+        full_id=$(api_call GET "/me/messages?\$top=$search_limit&\$select=id" | jq -r ".value[].id | select(endswith(\"$msg_id\"))" | head -1)
+        if [ -n "$full_id" ]; then echo "$full_id"; return 0; fi
+    fi
+
+    return 1
 }
 
 # Commands
@@ -148,25 +197,33 @@ case "$1" in
     inbox)
         count="${2:-10}"
         echo "Fetching inbox ($count messages)..."
-        api_call GET "/me/mailFolders/inbox/messages?\$top=$count&\$orderby=receivedDateTime%20desc&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview" | format_messages
+        result=$(api_call GET "/me/mailFolders/inbox/messages?\$top=$count&\$orderby=receivedDateTime%20desc&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview")
+        cache_message_ids "$result"
+        echo "$result" | format_messages
         ;;
 
     unread)
         count="${2:-10}"
         echo "Fetching unread messages..."
-        api_call GET "/me/mailFolders/inbox/messages?\$filter=isRead%20eq%20false&\$top=$count&\$orderby=receivedDateTime%20desc&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview" | format_messages
+        result=$(api_call GET "/me/mailFolders/inbox/messages?\$filter=isRead%20eq%20false&\$top=$count&\$orderby=receivedDateTime%20desc&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview")
+        cache_message_ids "$result"
+        echo "$result" | format_messages
         ;;
 
     focused)
         count="${2:-10}"
         echo "Fetching focused inbox..."
-        api_call GET "/me/mailFolders/inbox/messages?\$filter=inferenceClassification%20eq%20'focused'&\$top=$count&\$orderby=receivedDateTime%20desc&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview" | format_messages
+        result=$(api_call GET "/me/mailFolders/inbox/messages?\$filter=inferenceClassification%20eq%20'focused'&\$top=$count&\$orderby=receivedDateTime%20desc&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview")
+        cache_message_ids "$result"
+        echo "$result" | format_messages
         ;;
 
     sent)
         count="${2:-10}"
         echo "Fetching sent items ($count messages)..."
-        api_call GET "/me/mailFolders/sentitems/messages?\$top=$count&\$orderby=sentDateTime%20desc&\$select=id,subject,toRecipients,sentDateTime,bodyPreview" | jq -r '
+        result=$(api_call GET "/me/mailFolders/sentitems/messages?\$top=$count&\$orderby=sentDateTime%20desc&\$select=id,subject,toRecipients,sentDateTime,bodyPreview")
+        cache_message_ids "$result"
+        echo "$result" | jq -r '
             def short_id: .[-20:];
             .value | to_entries | .[] |
             "[\(.key + 1)] \(.value.id | short_id) | \(.value.sentDateTime | split("T")[0]) | To: \(.value.toRecipients[0].emailAddress.address // "unknown") | \(.value.subject // "(no subject)")"
@@ -181,7 +238,9 @@ case "$1" in
             exit 1
         fi
         echo "Fetching emails from $sender..."
-        api_call GET "/me/messages?\$search=%22from:$sender%22&\$top=$count&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview" | format_messages
+        result=$(api_call GET "/me/messages?\$search=%22from:$sender%22&\$top=$count&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview")
+        cache_message_ids "$result"
+        echo "$result" | format_messages
         ;;
 
     search)
@@ -194,12 +253,14 @@ case "$1" in
         # If query looks like an email address, use KQL from: search for precise matching
         if [[ "$query" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
             echo "Searching for emails from $query..."
-            api_call GET "/me/messages?\$search=%22from:$query%22&\$top=$count&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview" | format_messages
+            result=$(api_call GET "/me/messages?\$search=%22from:$query%22&\$top=$count&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview")
         else
             echo "Searching for: $query..."
             # Note: $search cannot be combined with $orderby in Microsoft Graph API
-            api_call GET "/me/messages?\$search=\"$query\"&\$top=$count&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview" | format_messages
+            result=$(api_call GET "/me/messages?\$search=\"$query\"&\$top=$count&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview")
         fi
+        cache_message_ids "$result"
+        echo "$result" | format_messages
         ;;
 
     read)
@@ -665,7 +726,9 @@ ${existing_body}"
     drafts)
         count="${2:-10}"
         echo "Fetching drafts..."
-        api_call GET "/me/mailFolders/drafts/messages?\$top=$count&\$orderby=createdDateTime%20desc&\$select=id,subject,toRecipients,createdDateTime" | jq -r '
+        result=$(api_call GET "/me/mailFolders/drafts/messages?\$top=$count&\$orderby=createdDateTime%20desc&\$select=id,subject,toRecipients,createdDateTime")
+        cache_message_ids "$result"
+        echo "$result" | jq -r '
             if .error then
                 "Error: \(.error.message // .error.code // "Unknown API error")"
             elif (.value | length) == 0 then
@@ -871,7 +934,9 @@ ${existing_body}"
         fi
 
         echo "Fetching messages from '$folder_name' ($count messages)..."
-        api_call GET "/me/mailFolders/$folder_id/messages?\$top=$count&\$orderby=receivedDateTime%20desc&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview" | format_messages
+        result=$(api_call GET "/me/mailFolders/$folder_id/messages?\$top=$count&\$orderby=receivedDateTime%20desc&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview")
+        cache_message_ids "$result"
+        echo "$result" | format_messages
         ;;
 
     stats)
