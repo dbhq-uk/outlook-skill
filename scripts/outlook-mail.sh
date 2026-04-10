@@ -67,6 +67,19 @@ if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
     exit 1
 fi
 
+# Build from/sender JSON fragment if OUTLOOK_FROM_ADDRESS is set
+# Returns empty string if not set, otherwise a JSON snippet to merge into payloads
+build_from_fields() {
+    local from_addr="${OUTLOOK_FROM_ADDRESS:-}"
+    local from_name="${OUTLOOK_FROM_NAME:-$from_addr}"
+    if [ -n "$from_addr" ]; then
+        jq -n --arg addr "$from_addr" --arg name "$from_name" \
+            '{ from: { emailAddress: { name: $name, address: $addr } }, sender: { emailAddress: { name: $name, address: $addr } } }'
+    else
+        echo "{}"
+    fi
+}
+
 # API call helper
 api_call() {
     local method="$1"
@@ -74,10 +87,14 @@ api_call() {
     local data="$3"
 
     if [ -n "$data" ]; then
+        local tmpfile
+        tmpfile=$(mktemp)
+        printf '%s' "$data" > "$tmpfile"
         curl -s -X "$method" "${GRAPH_URL}${endpoint}" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "$data"
+            -d @"$tmpfile"
+        rm -f "$tmpfile"
     else
         # Content-Length: 0 required for POST requests with no body
         curl -s -X "$method" "${GRAPH_URL}${endpoint}" \
@@ -334,6 +351,7 @@ case "$1" in
                     }
                 ]
             }')
+        payload=$(echo "$payload" "$(build_from_fields)" | jq -s '.[0] * .[1]')
 
         result=$(api_call POST "/me/messages" "$payload")
         draft_id=$(echo "$result" | jq -r '.id')
@@ -394,6 +412,7 @@ ${html_body}
                     }
                 ]
             }')
+        payload=$(echo "$payload" "$(build_from_fields)" | jq -s '.[0] * .[1]')
 
         result=$(api_call POST "/me/messages" "$payload")
         draft_id=$(echo "$result" | jq -r '.id')
@@ -1246,15 +1265,11 @@ ${existing_body}"
                 file_content=$(base64 -i "$file_path" | tr -d '\n')
             fi
 
-            payload=$(jq -n \
-                --arg name "$file_name" \
-                --arg contentType "$content_type" \
-                --arg contentBytes "$file_content" \
-                '{
+            payload=$(echo "$file_content" | jq -R --arg name "$file_name" --arg contentType "$content_type" '{
                     "@odata.type": "#microsoft.graph.fileAttachment",
                     "name": $name,
                     "contentType": $contentType,
-                    "contentBytes": $contentBytes
+                    "contentBytes": .
                 }')
 
             result=$(api_call POST "/me/messages/$draft_id/attachments" "$payload")
