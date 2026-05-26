@@ -7,6 +7,49 @@ description: Use for email and calendar operations - checking inbox, sending ema
 
 Access Microsoft 365 Outlook email and calendar via Microsoft Graph API.
 
+## CRITICAL: Reading email content
+
+**`preview` is a snippet (first ~200 chars of body), not the full message. NEVER use `preview` to analyse, summarise, respond to, or report on email content. A short preview does NOT mean a short message — the message can continue for many paragraphs and contain attachments, requests, deadlines, or substantive content not visible in the preview.**
+
+Mandatory rules:
+
+1. **Use `read <message-id>` for any substantive engagement** with an email — analysis, summary, reply, decision-making, documentation. Always.
+2. **Use `preview` only for navigation** — finding the right message ID from a list, confirming a subject line, checking date/sender. Never for content.
+3. **If the `read` output gets truncated** by terminal/tool limits, extract the body via grep or jq with a wide enough regex to capture the whole message. Do not stop at the first match.
+4. **Before replying to or reporting on a message, confirm internally**: "Have I read the full body end-to-end, including any attachment list and request lines?"
+5. **For long reply chains**: the `read` output includes the quoted prior chain. Identify the body of the *current* message (between the headers `---` separator and the start of the quoted chain) and ensure that body is fully captured before doing anything else.
+
+This rule exists because trusting previews has led to missing critical content (attachments, action requests, deadlines, off-chain coordination signals). It is non-negotiable.
+
+## Time and date awareness
+
+Email correspondence routinely uses relative times — "today", "yesterday", "by tomorrow", "this morning", "by EOD Tuesday". Each of those is ambiguous without an anchor.
+
+Mandatory rules:
+
+1. **At the start of any email work, run `date` via Bash** to confirm the current date/time. Never assume the date from earlier in the conversation — the conversation may span days, and the system date can roll over.
+2. **When computing deadlines or "ago" references**, anchor against actual `date` output, not memory. Example: an email timestamped `2026-05-06T16:10:58Z` is Wednesday 6 May at 17:10 BST (UTC+1 in summer), not yesterday.
+3. **When an email is about to be sent**, confirm the date in the planned send is correct (the date you're embedding in the body must match the date the email will actually arrive).
+4. **Track timezone explicitly** (BST vs UTC). UK summer time = UTC+1. Microsoft Graph timestamps are UTC.
+
+If unsure of the date or time, run `date` and `date -u` (UTC) before responding.
+
+## Email font and formatting preferences
+
+The skill applies these inline styles to every markdown-converted email body, on every command (`mddraft`, `mdreply`, `followup`, `update mdbody`):
+
+| Property | Value | Why inline |
+|---|---|---|
+| **Font family** | `'Aptos', 'Aptos Display', 'Segoe UI', Roboto, sans-serif` | Aptos is the Microsoft 365 default since 2024. Falls back to Segoe UI on older Outlook, Roboto / system sans on non-Microsoft clients. Inline `style=""` survives Outlook's `<style>`-block stripping. |
+| **Font size** | `14px` | Readable, professional |
+| **Line height** | `1.5` (mddraft / update mdbody) or `1.6` (mdreply / followup) | Comfortable spacing |
+| **Colour** | `#333` | Soft black; avoids harsh `#000` |
+| **Paragraph margin** | `0 0 14px 0` (inline on every `<p>` tag) | Outlook ignores `<p>` margins from `<style>` blocks but respects inline. Without this, paragraphs collapse together until Outlook re-renders the draft after an edit. |
+
+These are set in `scripts/outlook-mail.sh` — search for `font-family` and `<p style=` to locate the four code paths.
+
+To change font preferences globally, edit those four locations in the script.
+
 ## Prerequisites
 
 - Credentials configured in `~/.outlook/` (run setup if not done)
@@ -91,6 +134,8 @@ Access Microsoft 365 Outlook email and calendar via Microsoft Graph API.
 **Note:** `mddraft`, `mdreply`, and `update mdbody` require `pandoc` for markdown conversion. Install with `brew install pandoc` (macOS) or `apt install pandoc` (Linux).
 
 **IMPORTANT:** Always prefer `mdreply` over `reply` for professional emails - plain text replies look poorly formatted in Outlook.
+
+**Reply-chain preservation:** `update mdbody` automatically preserves the quoted reply chain on drafts created via `mdreply` or `followup` (an invisible `<span data-mdreply-chain-start="1">` marker is injected when the reply is created, and `update mdbody` splits on it). The plain `update body` command does NOT preserve the chain - if you need to edit a reply draft body, use `update mdbody`.
 
 ### Attachments
 
