@@ -67,19 +67,6 @@ if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
     exit 1
 fi
 
-# Build from/sender JSON fragment if OUTLOOK_FROM_ADDRESS is set
-# Returns empty string if not set, otherwise a JSON snippet to merge into payloads
-build_from_fields() {
-    local from_addr="${OUTLOOK_FROM_ADDRESS:-}"
-    local from_name="${OUTLOOK_FROM_NAME:-$from_addr}"
-    if [ -n "$from_addr" ]; then
-        jq -n --arg addr "$from_addr" --arg name "$from_name" \
-            '{ from: { emailAddress: { name: $name, address: $addr } }, sender: { emailAddress: { name: $name, address: $addr } } }'
-    else
-        echo "{}"
-    fi
-}
-
 # API call helper
 api_call() {
     local method="$1"
@@ -87,14 +74,10 @@ api_call() {
     local data="$3"
 
     if [ -n "$data" ]; then
-        local tmpfile
-        tmpfile=$(mktemp)
-        printf '%s' "$data" > "$tmpfile"
         curl -s -X "$method" "${GRAPH_URL}${endpoint}" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
-            -d @"$tmpfile"
-        rm -f "$tmpfile"
+            -d "$data"
     else
         # Content-Length: 0 required for POST requests with no body
         curl -s -X "$method" "${GRAPH_URL}${endpoint}" \
@@ -298,8 +281,6 @@ case "$1" in
             "Subject: \(.subject // "(no subject)")",
             "From: \(.from.emailAddress.name // "") <\(.from.emailAddress.address // "")>",
             "To: \([.toRecipients[].emailAddress | "\(.name // "") <\(.address)>"] | join(", "))",
-            (if ((.ccRecipients // []) | length) > 0 then "Cc: \([.ccRecipients[].emailAddress | "\(.name // "") <\(.address)>"] | join(", "))" else empty end),
-            (if ((.bccRecipients // []) | length) > 0 then "Bcc: \([.bccRecipients[].emailAddress | "\(.name // "") <\(.address)>"] | join(", "))" else empty end),
             "Date: \(.receivedDateTime)",
             "---",
             (.body.content | gsub("<[^>]*>"; "") | gsub("&nbsp;"; " ") | gsub("\\s+"; " ") | ltrimstr(" ") | rtrimstr(" "))'
@@ -318,12 +299,9 @@ case "$1" in
             exit 1
         fi
 
-        api_call GET "/me/messages/$msg_id?\$select=id,subject,from,toRecipients,ccRecipients,bccRecipients,receivedDateTime,bodyPreview" | jq -r '
+        api_call GET "/me/messages/$msg_id?\$select=id,subject,from,receivedDateTime,bodyPreview" | jq -r '
             "Subject: \(.subject // "(no subject)")",
             "From: \(.from.emailAddress.address // "")",
-            "To: \([.toRecipients[].emailAddress.address] | join(", "))",
-            (if ((.ccRecipients // []) | length) > 0 then "Cc: \([.ccRecipients[].emailAddress.address] | join(", "))" else empty end),
-            (if ((.bccRecipients // []) | length) > 0 then "Bcc: \([.bccRecipients[].emailAddress.address] | join(", "))" else empty end),
             "Date: \(.receivedDateTime)",
             "Preview: \(.bodyPreview)"'
         ;;
@@ -338,25 +316,55 @@ case "$1" in
         fi
 
         echo "Creating draft..."
-        payload=$(jq -n \
-            --arg to "$to" \
-            --arg subject "$subject" \
-            --arg body "${body:-}" \
-            '{
-                subject: $subject,
-                body: {
-                    contentType: "Text",
-                    content: $body
-                },
-                toRecipients: [
-                    {
+        from_address="${OUTLOOK_FROM_ADDRESS:-}"
+        from_name="${OUTLOOK_FROM_NAME:-}"
+        if [ -n "$from_address" ]; then
+            payload=$(jq -n \
+                --arg to "$to" \
+                --arg subject "$subject" \
+                --arg body "${body:-}" \
+                --arg from_addr "$from_address" \
+                --arg from_name "$from_name" \
+                '{
+                    subject: $subject,
+                    body: {
+                        contentType: "Text",
+                        content: $body
+                    },
+                    from: {
                         emailAddress: {
-                            address: $to
+                            address: $from_addr,
+                            name: $from_name
                         }
-                    }
-                ]
-            }')
-        payload=$(echo "$payload" "$(build_from_fields)" | jq -s '.[0] * .[1]')
+                    },
+                    toRecipients: [
+                        {
+                            emailAddress: {
+                                address: $to
+                            }
+                        }
+                    ]
+                }')
+        else
+            payload=$(jq -n \
+                --arg to "$to" \
+                --arg subject "$subject" \
+                --arg body "${body:-}" \
+                '{
+                    subject: $subject,
+                    body: {
+                        contentType: "Text",
+                        content: $body
+                    },
+                    toRecipients: [
+                        {
+                            emailAddress: {
+                                address: $to
+                            }
+                        }
+                    ]
+                }')
+        fi
 
         result=$(api_call POST "/me/messages" "$payload")
         draft_id=$(echo "$result" | jq -r '.id')
@@ -392,32 +400,62 @@ case "$1" in
         echo "Creating markdown draft..."
 
         # Convert markdown to HTML
-        html_body=$(echo "${body:-}" | pandoc -f markdown -t html | sed 's|<p>|<p style="margin: 0 0 14px 0;">|g')
+        html_body=$(echo "${body:-}" | pandoc -f markdown -t html)
 
         # Wrap in basic email-friendly HTML structure
-        html_body="<html><body style=\"font-family: 'Aptos', 'Aptos Display', 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.5; color: #333;\">
+        html_body="<html><body style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.5; color: #333;\">
 ${html_body}
 </body></html>"
 
-        payload=$(jq -n \
-            --arg to "$to" \
-            --arg subject "$subject" \
-            --arg body "$html_body" \
-            '{
-                subject: $subject,
-                body: {
-                    contentType: "HTML",
-                    content: $body
-                },
-                toRecipients: [
-                    {
+        from_address="${OUTLOOK_FROM_ADDRESS:-}"
+        from_name="${OUTLOOK_FROM_NAME:-}"
+        if [ -n "$from_address" ]; then
+            payload=$(jq -n \
+                --arg to "$to" \
+                --arg subject "$subject" \
+                --arg body "$html_body" \
+                --arg from_addr "$from_address" \
+                --arg from_name "$from_name" \
+                '{
+                    subject: $subject,
+                    body: {
+                        contentType: "HTML",
+                        content: $body
+                    },
+                    from: {
                         emailAddress: {
-                            address: $to
+                            address: $from_addr,
+                            name: $from_name
                         }
-                    }
-                ]
-            }')
-        payload=$(echo "$payload" "$(build_from_fields)" | jq -s '.[0] * .[1]')
+                    },
+                    toRecipients: [
+                        {
+                            emailAddress: {
+                                address: $to
+                            }
+                        }
+                    ]
+                }')
+        else
+            payload=$(jq -n \
+                --arg to "$to" \
+                --arg subject "$subject" \
+                --arg body "$html_body" \
+                '{
+                    subject: $subject,
+                    body: {
+                        contentType: "HTML",
+                        content: $body
+                    },
+                    toRecipients: [
+                        {
+                            emailAddress: {
+                                address: $to
+                            }
+                        }
+                    ]
+                }')
+        fi
 
         result=$(api_call POST "/me/messages" "$payload")
         draft_id=$(echo "$result" | jq -r '.id')
@@ -518,17 +556,8 @@ ${html_body}
                     exit 1
                 fi
                 echo "Updating body (markdown -> HTML)..."
-                html_body=$(echo "$value" | pandoc -f markdown -t html | sed 's|<p>|<p style="margin: 0 0 14px 0;">|g')
-                html_body="<div style=\"font-family: 'Aptos', 'Aptos Display', 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.5; color: #333;\">${html_body}</div>"
-
-                # Preserve quoted reply chain if this draft was created via mdreply/followup
-                current_body=$(api_call GET "/me/messages/$draft_id?\$select=body" | jq -r '.body.content // ""')
-                chain_part=$(printf '%s' "$current_body" | python3 -c 'import sys; b=sys.stdin.read(); m="<span data-mdreply-chain-start=\"1\"></span>"; i=b.find(m); sys.stdout.write(b[i:] if i>=0 else "")')
-                if [ -n "$chain_part" ]; then
-                    echo "(preserving quoted reply chain)"
-                    html_body="${html_body}<br/>${chain_part}"
-                fi
-
+                html_body=$(echo "$value" | pandoc -f markdown -t html)
+                html_body="<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.5; color: #333;\">${html_body}</div>"
                 payload=$(jq -n --arg body "$html_body" '{body: {contentType: "HTML", content: $body}}')
                 ;;
             to)
@@ -544,24 +573,20 @@ ${html_body}
                     echo "Error: Email address required"
                     exit 1
                 fi
-                echo "Adding CC recipient(s)..."
-                # Get existing CC recipients and add new one(s) - supports comma-separated addresses
+                echo "Adding CC recipient..."
+                # Get existing CC recipients and add new one
                 existing=$(api_call GET "/me/messages/$draft_id?\$select=ccRecipients" | jq '.ccRecipients // []')
-                payload=$(echo "$existing" | jq --arg emails "$value" '
-                    . + ($emails | split(",") | map(. | gsub("^\\s+|\\s+$"; "")) | map(select(length > 0)) | map({emailAddress: {address: .}}))
-                    | {ccRecipients: .}')
+                payload=$(echo "$existing" | jq --arg email "$value" '. + [{emailAddress: {address: $email}}] | {ccRecipients: .}')
                 ;;
             bcc)
                 if [ -z "$value" ]; then
                     echo "Error: Email address required"
                     exit 1
                 fi
-                echo "Adding BCC recipient(s)..."
-                # Get existing BCC recipients and add new one(s) - supports comma-separated addresses
+                echo "Adding BCC recipient..."
+                # Get existing BCC recipients and add new one
                 existing=$(api_call GET "/me/messages/$draft_id?\$select=bccRecipients" | jq '.bccRecipients // []')
-                payload=$(echo "$existing" | jq --arg emails "$value" '
-                    . + ($emails | split(",") | map(. | gsub("^\\s+|\\s+$"; "")) | map(select(length > 0)) | map({emailAddress: {address: .}}))
-                    | {bccRecipients: .}')
+                payload=$(echo "$existing" | jq --arg email "$value" '. + [{emailAddress: {address: $email}}] | {bccRecipients: .}')
                 ;;
             *)
                 echo "Error: Unknown field '$field'"
@@ -619,15 +644,13 @@ ${html_body}
         existing_body=$(echo "$result" | jq -r '.body.content // ""')
 
         # Step 3: Convert markdown to HTML
-        html_body=$(echo "$body" | pandoc -f markdown -t html | sed 's|<p>|<p style="margin: 0 0 14px 0;">|g')
+        html_body=$(echo "$body" | pandoc -f markdown -t html)
 
-        # Wrap reply in styled div and prepend to existing thread.
-        # MDREPLY-CHAIN-START marker lets `update mdbody` preserve the quoted thread on subsequent edits.
-        combined_body="<div style=\"font-family: 'Aptos', 'Aptos Display', 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6; color: #333;\">
+        # Wrap reply in styled div and prepend to existing thread
+        combined_body="<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6; color: #333;\">
 ${html_body}
 </div>
 <br/>
-<span data-mdreply-chain-start=\"1\"></span>
 ${existing_body}"
 
         # Step 4: PATCH the draft to update body with combined HTML
@@ -702,15 +725,13 @@ Please let me know if you have any questions or need any additional information.
         existing_body=$(echo "$result" | jq -r '.body.content // ""')
 
         # Step 3: Convert markdown to HTML
-        html_body=$(echo "$body" | pandoc -f markdown -t html | sed 's|<p>|<p style="margin: 0 0 14px 0;">|g')
+        html_body=$(echo "$body" | pandoc -f markdown -t html)
 
-        # Wrap reply in styled div and prepend to existing thread.
-        # MDREPLY-CHAIN-START marker lets `update mdbody` preserve the quoted thread on subsequent edits.
-        combined_body="<div style=\"font-family: 'Aptos', 'Aptos Display', 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6; color: #333;\">
+        # Wrap reply in styled div and prepend to existing thread
+        combined_body="<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6; color: #333;\">
 ${html_body}
 </div>
 <br/>
-<span data-mdreply-chain-start=\"1\"></span>
 ${existing_body}"
 
         # Step 4: PATCH the draft to update body with combined HTML
@@ -1287,11 +1308,15 @@ ${existing_body}"
                 file_content=$(base64 -i "$file_path" | tr -d '\n')
             fi
 
-            payload=$(echo "$file_content" | jq -R --arg name "$file_name" --arg contentType "$content_type" '{
+            payload=$(jq -n \
+                --arg name "$file_name" \
+                --arg contentType "$content_type" \
+                --arg contentBytes "$file_content" \
+                '{
                     "@odata.type": "#microsoft.graph.fileAttachment",
                     "name": $name,
                     "contentType": $contentType,
-                    "contentBytes": .
+                    "contentBytes": $contentBytes
                 }')
 
             result=$(api_call POST "/me/messages/$draft_id/attachments" "$payload")
