@@ -7,6 +7,19 @@ description: Use for email and calendar operations - checking inbox, sending ema
 
 Access Microsoft 365 Outlook email and calendar via Microsoft Graph API.
 
+## CRITICAL: Replies preserve ALL original recipients (reply-all by default)
+
+**`reply`, `mdreply`, and `followup` use Microsoft Graph's `createReplyAll` endpoint. The new draft includes every `To:` and `Cc:` recipient from the original message — not just the sender.**
+
+Mandatory rules:
+
+1. **Always read the original message's full `To:` and `Cc:` lists BEFORE creating a reply.** Use a direct API call if `read` truncates: `curl … "/me/messages/<id>?$select=toRecipients,ccRecipients"`. Knowing who's on the thread is part of "reading the full body end-to-end" — do not skip it.
+2. **After creating any reply draft, confirm the displayed `To:`, `Cc:`, and `Bcc:` lines match what you intended.** All three reply commands now print every recipient (not just `To[0]`). If the list looks short, the original might have had CCs you missed — re-check before sending.
+3. **If you genuinely want sender-only**, create the reply, then run `update to <sender-email>` and `update cc ""` (or manually edit) to trim recipients. Default is "everyone stays in the loop".
+4. **Never assume a single-recipient `To:` means a single-recipient thread.** Estate agents, solicitors, accountants, and courts routinely Cc colleagues, assistants, and audit addresses. Dropping those CCs on reply is a real harm — they stop seeing the conversation.
+
+This rule exists because a previous reply silently dropped two CCs (assistant addresses on an estate-agent thread); the recipients had to be looped back in via a follow-up email. Reply-all is now the default to make recipient loss impossible by accident.
+
 ## CRITICAL: Reading email content
 
 **`preview` is a snippet (first ~200 chars of body), not the full message. NEVER use `preview` to analyse, summarise, respond to, or report on email content. A short preview does NOT mean a short message — the message can continue for many paragraphs and contain attachments, requests, deadlines, or substantive content not visible in the preview.**
@@ -106,11 +119,13 @@ To change font preferences globally, edit those four locations in the script.
 # Send a draft (use draft ID)
 ~/.claude/skills/outlook/scripts/outlook-mail.sh send <draft-id>
 
-# Reply to a message (plain text - creates draft)
+# Reply to a message (plain text - creates draft, REPLY-ALL: includes original To: + Cc:)
 ~/.claude/skills/outlook/scripts/outlook-mail.sh reply <message-id> "Reply body"
 
-# Reply with markdown formatting (converts to HTML - creates draft)
+# Reply with markdown formatting (converts to HTML - creates draft, REPLY-ALL: includes original To: + Cc:)
 ~/.claude/skills/outlook/scripts/outlook-mail.sh mdreply <message-id> "**Bold** reply with _formatting_"
+
+# (For sender-only reply, create the draft then trim recipients via `update to`/`update cc`.)
 
 # Send reply draft
 ~/.claude/skills/outlook/scripts/outlook-mail.sh send <reply-draft-id>
