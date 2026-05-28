@@ -486,10 +486,10 @@ ${html_body}
             exit 1
         fi
 
-        echo "Creating reply draft..."
+        echo "Creating reply-all draft..."
         payload=$(jq -n --arg body "$body" '{comment: $body}')
 
-        result=$(api_call POST "/me/messages/$msg_id/createReply" "$payload")
+        result=$(api_call POST "/me/messages/$msg_id/createReplyAll" "$payload")
         draft_id=$(echo "$result" | jq -r '.id')
 
         if [ -z "$draft_id" ] || [ "$draft_id" = "null" ]; then
@@ -501,7 +501,12 @@ ${html_body}
         echo "Reply draft created!"
         echo "Draft ID: ${draft_id: -20}"
         echo
-        echo "$result" | jq -r '"To: \(.toRecipients[0].emailAddress.address)", "Subject: \(.subject)"'
+        echo "$result" | jq -r '
+            "To:      \(.toRecipients | map(.emailAddress.address) | join(", "))",
+            (if (.ccRecipients | length) > 0 then "Cc:      \(.ccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
+            (if (.bccRecipients | length) > 0 then "Bcc:     \(.bccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
+            "Subject: \(.subject)"
+        '
         ;;
 
     update)
@@ -558,7 +563,22 @@ ${html_body}
                 echo "Updating body (markdown -> HTML)..."
                 html_body=$(echo "$value" | pandoc -f markdown -t html)
                 html_body="<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.5; color: #333;\">${html_body}</div>"
-                payload=$(jq -n --arg body "$html_body" '{body: {contentType: "HTML", content: $body}}')
+
+                # Preserve reply chain if the draft was created via mdreply or followup.
+                # Those commands inject a `<span data-mdreply-chain-start="1"></span>`
+                # marker between the new message and the quoted history. If we find
+                # that marker, keep everything from the marker onwards.
+                chain_marker='<span data-mdreply-chain-start="1"></span>'
+                existing_body=$(api_call GET "/me/messages/$draft_id?\$select=body" | jq -r '.body.content // ""')
+                if [[ "$existing_body" == *"$chain_marker"* ]]; then
+                    # Everything from the first occurrence of the marker onwards
+                    chain_part="${chain_marker}${existing_body#*$chain_marker}"
+                    full_body="${html_body}<br/>${chain_part}"
+                else
+                    full_body="${html_body}"
+                fi
+
+                payload=$(jq -n --arg body "$full_body" '{body: {contentType: "HTML", content: $body}}')
                 ;;
             to)
                 if [ -z "$value" ]; then
@@ -604,7 +624,12 @@ ${html_body}
         fi
 
         echo "Draft updated!"
-        echo "$result" | jq -r '"To: \(.toRecipients[0].emailAddress.address // "none")", "Subject: \(.subject // "(no subject)")"'
+        echo "$result" | jq -r '
+            "To:      \((.toRecipients // []) | map(.emailAddress.address) | join(", ") | (if . == "" then "none" else . end))",
+            (if ((.ccRecipients // []) | length) > 0 then "Cc:      \(.ccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
+            (if ((.bccRecipients // []) | length) > 0 then "Bcc:     \(.bccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
+            "Subject: \(.subject // "(no subject)")"
+        '
         ;;
 
     mdreply)
@@ -628,10 +653,13 @@ ${html_body}
             exit 1
         fi
 
-        echo "Creating reply draft with markdown formatting..."
+        echo "Creating reply-all draft with markdown formatting..."
 
-        # Step 1: Create reply draft (empty comment to get thread headers)
-        result=$(api_call POST "/me/messages/$msg_id/createReply" '{}')
+        # Step 1: Create reply-all draft (empty comment to get thread headers)
+        # createReplyAll preserves all original To: and Cc: recipients - this is the
+        # correct default for litigation/business threads where dropping CCs is harmful.
+        # To reply to the sender only, use mdreply and then `update to <email>` after.
+        result=$(api_call POST "/me/messages/$msg_id/createReplyAll" '{}')
         draft_id=$(echo "$result" | jq -r '.id')
 
         if [ -z "$draft_id" ] || [ "$draft_id" = "null" ]; then
@@ -646,11 +674,15 @@ ${html_body}
         # Step 3: Convert markdown to HTML
         html_body=$(echo "$body" | pandoc -f markdown -t html)
 
-        # Wrap reply in styled div and prepend to existing thread
+        # Wrap reply in styled div and prepend to existing thread.
+        # The `data-mdreply-chain-start` marker lets `update mdbody` find the
+        # boundary between the new message and the quoted chain so subsequent
+        # edits can replace the message without losing the chain.
         combined_body="<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6; color: #333;\">
 ${html_body}
 </div>
 <br/>
+<span data-mdreply-chain-start=\"1\"></span>
 ${existing_body}"
 
         # Step 4: PATCH the draft to update body with combined HTML
@@ -674,7 +706,12 @@ ${existing_body}"
         echo "Reply draft created (HTML from Markdown)!"
         echo "Draft ID: ${draft_id: -20}"
         echo
-        echo "$patch_result" | jq -r '"To: \(.toRecipients[0].emailAddress.address)", "Subject: \(.subject)"'
+        echo "$patch_result" | jq -r '
+            "To:      \(.toRecipients | map(.emailAddress.address) | join(", "))",
+            (if (.ccRecipients | length) > 0 then "Cc:      \(.ccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
+            (if (.bccRecipients | length) > 0 then "Bcc:     \(.bccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
+            "Subject: \(.subject)"
+        '
         ;;
 
     followup)
@@ -712,7 +749,7 @@ Please let me know if you have any questions or need any additional information.
         echo "Creating follow-up draft for sent message..."
 
         # Step 1: Create reply draft using replyAll to include all original recipients
-        result=$(api_call POST "/me/messages/$msg_id/createReply" '{}')
+        result=$(api_call POST "/me/messages/$msg_id/createReplyAll" '{}')
         draft_id=$(echo "$result" | jq -r '.id')
 
         if [ -z "$draft_id" ] || [ "$draft_id" = "null" ]; then
@@ -727,11 +764,15 @@ Please let me know if you have any questions or need any additional information.
         # Step 3: Convert markdown to HTML
         html_body=$(echo "$body" | pandoc -f markdown -t html)
 
-        # Wrap reply in styled div and prepend to existing thread
+        # Wrap reply in styled div and prepend to existing thread.
+        # The `data-mdreply-chain-start` marker lets `update mdbody` find the
+        # boundary between the new message and the quoted chain so subsequent
+        # edits can replace the message without losing the chain.
         combined_body="<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6; color: #333;\">
 ${html_body}
 </div>
 <br/>
+<span data-mdreply-chain-start=\"1\"></span>
 ${existing_body}"
 
         # Step 4: PATCH the draft to update body with combined HTML
@@ -755,7 +796,12 @@ ${existing_body}"
         echo "Follow-up draft created!"
         echo "Draft ID: ${draft_id: -20}"
         echo
-        echo "$patch_result" | jq -r '"To: \(.toRecipients[0].emailAddress.address)", "Subject: \(.subject)"'
+        echo "$patch_result" | jq -r '
+            "To:      \(.toRecipients | map(.emailAddress.address) | join(", "))",
+            (if (.ccRecipients | length) > 0 then "Cc:      \(.ccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
+            (if (.bccRecipients | length) > 0 then "Bcc:     \(.bccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
+            "Subject: \(.subject)"
+        '
         echo
         echo "Use 'outlook-mail.sh send ${draft_id: -20}' to send"
         ;;
