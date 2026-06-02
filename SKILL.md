@@ -63,9 +63,34 @@ These are set in `scripts/outlook-mail.sh` — search for `font-family` and `<p 
 
 To change font preferences globally, edit those four locations in the script.
 
+## Multiple accounts
+
+Each account stores credentials under `~/.outlook/<account>/`. The active account is selected by (in order of precedence): `--account <name>` / `-a <name>` flag, the `OUTLOOK_ACCOUNT` env var, then `default`.
+
+```bash
+# Default account
+~/.claude/skills/outlook/scripts/outlook-mail.sh inbox
+
+# Named account (flag)
+~/.claude/skills/outlook/scripts/outlook-mail.sh -a work inbox
+
+# Named account (env var)
+OUTLOOK_ACCOUNT=work ~/.claude/skills/outlook/scripts/outlook-mail.sh inbox
+
+# List configured accounts
+~/.claude/skills/outlook/scripts/outlook-token.sh list
+
+# Add a new account (reuses existing Azure app registration if one exists)
+~/.claude/skills/outlook/scripts/outlook-setup.sh --account work
+```
+
+An existing single-account install at `~/.outlook/{config,credentials,id_cache}.json` is auto-migrated to `~/.outlook/default/` on the first run of any script.
+
+Calendar timezone is auto-detected from the system. Override with `OUTLOOK_TZ`, e.g. `OUTLOOK_TZ=America/New_York ~/.claude/skills/outlook/scripts/outlook-calendar.sh today`.
+
 ## Prerequisites
 
-- Credentials configured in `~/.outlook/` (run setup if not done)
+- Credentials configured in `~/.outlook/<account>/` (run setup if not done)
 - Azure CLI, jq, curl installed
 
 **Note:** Tokens are automatically refreshed when needed. No manual intervention required.

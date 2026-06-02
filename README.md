@@ -154,6 +154,35 @@ Inbox: X total, Y unread
 ~/.claude/skills/outlook/scripts/outlook-calendar.sh delete <event-id>
 ```
 
+### Multiple Accounts
+
+Each account stores credentials under `~/.outlook/<account>/`. The active account is selected by (in order of precedence): `--account <name>` / `-a <name>` flag, the `OUTLOOK_ACCOUNT` env var, then `default`.
+
+```bash
+# Default account
+~/.claude/skills/outlook/scripts/outlook-mail.sh inbox
+
+# Named account (flag)
+~/.claude/skills/outlook/scripts/outlook-mail.sh -a work inbox
+
+# Named account (env var)
+OUTLOOK_ACCOUNT=work ~/.claude/skills/outlook/scripts/outlook-mail.sh inbox
+
+# List configured accounts
+~/.claude/skills/outlook/scripts/outlook-token.sh list
+
+# Add a new account (reuses existing Azure app registration if one is already configured)
+~/.claude/skills/outlook/scripts/outlook-setup.sh --account work
+```
+
+An existing single-account install at `~/.outlook/{config,credentials,id_cache}.json` is auto-migrated to `~/.outlook/default/` on the first run of any script — no manual action needed.
+
+**Calendar timezone** is auto-detected from the system (`/etc/timezone`, `timedatectl`, or `/etc/localtime`). Override per-run with the `OUTLOOK_TZ` env var:
+
+```bash
+OUTLOOK_TZ=America/New_York ~/.claude/skills/outlook/scripts/outlook-calendar.sh today
+```
+
 ### Token Management
 
 ```bash
