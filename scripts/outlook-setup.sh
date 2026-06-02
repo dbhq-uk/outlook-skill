@@ -11,18 +11,40 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-CONFIG_DIR="$HOME/.outlook"
+BASE_DIR="$HOME/.outlook"
+
+# Account resolution: --account/-a flag wins, else OUTLOOK_ACCOUNT env, else "default"
+ACCOUNT="${OUTLOOK_ACCOUNT:-default}"
+if [ "$1" = "--account" ] || [ "$1" = "-a" ]; then
+    ACCOUNT="$2"; shift 2
+fi
+
+# One-time migration: legacy flat config -> default/
+if [ -f "$BASE_DIR/config.json" ] && [ ! -d "$BASE_DIR/default" ]; then
+    mkdir -p "$BASE_DIR/default"
+    mv "$BASE_DIR/config.json" "$BASE_DIR/credentials.json" "$BASE_DIR/id_cache.json" \
+       "$BASE_DIR/default/" 2>/dev/null || true
+fi
+
+CONFIG_DIR="$BASE_DIR/$ACCOUNT"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 CREDS_FILE="$CONFIG_DIR/credentials.json"
-APP_NAME="Claude-Outlook-Integration"
+
+# App name is suffixed per non-default account when a fresh app is created.
+if [ "$ACCOUNT" = "default" ]; then
+    APP_NAME="Claude-Outlook-Integration"
+else
+    APP_NAME="Claude-Outlook-Integration-$ACCOUNT"
+fi
 
 echo -e "${BLUE}=== Outlook OAuth Setup ===${NC}"
+echo -e "Account: ${GREEN}$ACCOUNT${NC}"
 echo
 
 # Check dependencies
 echo -e "${YELLOW}Checking dependencies...${NC}"
 
-if ! command -v az &> /dev/null; then
+if [ -z "$SKIP_APP_CREATE" ] && ! command -v az &> /dev/null; then
     echo -e "${RED}Error: Azure CLI (az) not found${NC}"
     echo "Install: https://docs.microsoft.com/en-us/cli/azure/install-azure-cli"
     exit 1
@@ -52,98 +74,128 @@ if [ -f "$CONFIG_FILE" ]; then
     fi
 fi
 
-# Create config directory
-mkdir -p "$CONFIG_DIR"
-chmod 700 "$CONFIG_DIR"
-
 # Step 1: Azure login
-echo -e "${BLUE}Step 1/7: Azure Login${NC}"
-echo "Logging into Azure..."
+if [ -z "$SKIP_APP_CREATE" ]; then
+    echo -e "${BLUE}Step 1/7: Azure Login${NC}"
+    echo "Logging into Azure..."
 
-if ! az account show &> /dev/null; then
-    az login --use-device-code
+    if ! az account show &> /dev/null; then
+        az login --use-device-code
+    fi
+
+    echo -e "${GREEN}Logged in to Azure${NC}"
+    echo
 fi
-
-echo -e "${GREEN}Logged in to Azure${NC}"
-echo
 
 # Step 2: Create or get app registration
 echo -e "${BLUE}Step 2/7: App Registration${NC}"
 
-# Check if app already exists
-EXISTING_APP=$(az ad app list --display-name "$APP_NAME" --query "[0].appId" -o tsv 2>/dev/null || echo "")
+# Reuse an existing account's app registration when available. The app is
+# multi-tenant + personal-account, so one app can authorize many mailboxes,
+# and additional mailboxes then need no Azure admin rights.
+REUSE_CONFIG=""
+for dir in "$BASE_DIR"/*/; do
+    other="$dir/config.json"
+    [ "$dir" = "$CONFIG_DIR/" ] && continue
+    [ -f "$other" ] || continue
+    REUSE_CONFIG="$other"
+    break
+done
 
-if [ -n "$EXISTING_APP" ] && [ "$EXISTING_APP" != "None" ]; then
-    echo -e "${YELLOW}Found existing app: $EXISTING_APP${NC}"
-    read -p "Use existing app? (Y/n): " use_existing
-    if [[ "$use_existing" =~ ^[Nn]$ ]]; then
-        echo "Creating new app..."
+if [ -n "$REUSE_CONFIG" ]; then
+    REUSE_NAME=$(basename "$(dirname "$REUSE_CONFIG")")
+    echo -e "${YELLOW}Found existing app registration from account '$REUSE_NAME'.${NC}"
+    read -p "Reuse it for '$ACCOUNT'? (recommended) (Y/n): " reuse_ans
+    if [[ ! "$reuse_ans" =~ ^[Nn]$ ]]; then
+        CLIENT_ID=$(jq -r '.client_id' "$REUSE_CONFIG")
+        CLIENT_SECRET=$(jq -r '.client_secret' "$REUSE_CONFIG")
+        echo -e "${GREEN}Reusing app: $CLIENT_ID${NC}"
+        SKIP_APP_CREATE=1
+    fi
+fi
+
+if [ -z "$SKIP_APP_CREATE" ]; then
+    # Check if app already exists
+    EXISTING_APP=$(az ad app list --display-name "$APP_NAME" --query "[0].appId" -o tsv 2>/dev/null || echo "")
+
+    if [ -n "$EXISTING_APP" ] && [ "$EXISTING_APP" != "None" ]; then
+        echo -e "${YELLOW}Found existing app: $EXISTING_APP${NC}"
+        read -p "Use existing app? (Y/n): " use_existing
+        if [[ "$use_existing" =~ ^[Nn]$ ]]; then
+            echo "Creating new app..."
+            CLIENT_ID=$(az ad app create \
+                --display-name "$APP_NAME-$(date +%s)" \
+                --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
+                --web-redirect-uris "https://login.microsoftonline.com/common/oauth2/nativeclient" \
+                --query appId -o tsv)
+        else
+            CLIENT_ID="$EXISTING_APP"
+        fi
+    else
+        echo "Creating app registration..."
         CLIENT_ID=$(az ad app create \
-            --display-name "$APP_NAME-$(date +%s)" \
+            --display-name "$APP_NAME" \
             --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
             --web-redirect-uris "https://login.microsoftonline.com/common/oauth2/nativeclient" \
             --query appId -o tsv)
-    else
-        CLIENT_ID="$EXISTING_APP"
     fi
-else
-    echo "Creating app registration..."
-    CLIENT_ID=$(az ad app create \
-        --display-name "$APP_NAME" \
-        --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
-        --web-redirect-uris "https://login.microsoftonline.com/common/oauth2/nativeclient" \
-        --query appId -o tsv)
+
+    echo -e "${GREEN}App ID: $CLIENT_ID${NC}"
+    echo
 fi
 
-echo -e "${GREEN}App ID: $CLIENT_ID${NC}"
-echo
-
 # Step 3: Create client secret
-echo -e "${BLUE}Step 3/7: Creating Client Secret${NC}"
+if [ -z "$SKIP_APP_CREATE" ]; then
+    echo -e "${BLUE}Step 3/7: Creating Client Secret${NC}"
 
-SECRET_RESULT=$(az ad app credential reset \
-    --id "$CLIENT_ID" \
-    --append \
-    --display-name "Claude Code Secret" \
-    --years 2 \
-    --query password -o tsv)
+    SECRET_RESULT=$(az ad app credential reset \
+        --id "$CLIENT_ID" \
+        --append \
+        --display-name "Claude Code Secret" \
+        --years 2 \
+        --query password -o tsv)
 
-CLIENT_SECRET="$SECRET_RESULT"
-echo -e "${GREEN}Client secret created (valid for 2 years)${NC}"
-echo
+    CLIENT_SECRET="$SECRET_RESULT"
+    echo -e "${GREEN}Client secret created (valid for 2 years)${NC}"
+    echo
+fi
 
 # Step 4: Add API permissions
-echo -e "${BLUE}Step 4/7: Configuring API Permissions${NC}"
+if [ -z "$SKIP_APP_CREATE" ]; then
+    echo -e "${BLUE}Step 4/7: Configuring API Permissions${NC}"
 
-# Microsoft Graph API ID
-GRAPH_API="00000003-0000-0000-c000-000000000000"
+    # Microsoft Graph API ID
+    GRAPH_API="00000003-0000-0000-c000-000000000000"
 
-# Permission IDs (delegated)
-MAIL_READ_WRITE="024d486e-b451-40bb-833d-3e66d98c5c73"    # Mail.ReadWrite
-MAIL_SEND="e383f46e-2787-4529-855e-0e479a3ffac0"          # Mail.Send
-CALENDARS_READ_WRITE="1ec239c2-d7c9-4623-a91a-a9775856bb36" # Calendars.ReadWrite
-OFFLINE_ACCESS="7427e0e9-2fba-42fe-b0c0-848c9e6a8182"     # offline_access
-USER_READ="e1fe6dd8-ba31-4d61-89e7-88639da4683d"          # User.Read
+    # Permission IDs (delegated)
+    MAIL_READ_WRITE="024d486e-b451-40bb-833d-3e66d98c5c73"    # Mail.ReadWrite
+    MAIL_SEND="e383f46e-2787-4529-855e-0e479a3ffac0"          # Mail.Send
+    CALENDARS_READ_WRITE="1ec239c2-d7c9-4623-a91a-a9775856bb36" # Calendars.ReadWrite
+    OFFLINE_ACCESS="7427e0e9-2fba-42fe-b0c0-848c9e6a8182"     # offline_access
+    USER_READ="e1fe6dd8-ba31-4d61-89e7-88639da4683d"          # User.Read
 
-echo "Adding Mail.ReadWrite..."
-az ad app permission add --id "$CLIENT_ID" --api "$GRAPH_API" --api-permissions "$MAIL_READ_WRITE=Scope" 2>/dev/null || true
+    echo "Adding Mail.ReadWrite..."
+    az ad app permission add --id "$CLIENT_ID" --api "$GRAPH_API" --api-permissions "$MAIL_READ_WRITE=Scope" 2>/dev/null || true
 
-echo "Adding Mail.Send..."
-az ad app permission add --id "$CLIENT_ID" --api "$GRAPH_API" --api-permissions "$MAIL_SEND=Scope" 2>/dev/null || true
+    echo "Adding Mail.Send..."
+    az ad app permission add --id "$CLIENT_ID" --api "$GRAPH_API" --api-permissions "$MAIL_SEND=Scope" 2>/dev/null || true
 
-echo "Adding Calendars.ReadWrite..."
-az ad app permission add --id "$CLIENT_ID" --api "$GRAPH_API" --api-permissions "$CALENDARS_READ_WRITE=Scope" 2>/dev/null || true
+    echo "Adding Calendars.ReadWrite..."
+    az ad app permission add --id "$CLIENT_ID" --api "$GRAPH_API" --api-permissions "$CALENDARS_READ_WRITE=Scope" 2>/dev/null || true
 
-echo "Adding offline_access..."
-az ad app permission add --id "$CLIENT_ID" --api "$GRAPH_API" --api-permissions "$OFFLINE_ACCESS=Scope" 2>/dev/null || true
+    echo "Adding offline_access..."
+    az ad app permission add --id "$CLIENT_ID" --api "$GRAPH_API" --api-permissions "$OFFLINE_ACCESS=Scope" 2>/dev/null || true
 
-echo "Adding User.Read..."
-az ad app permission add --id "$CLIENT_ID" --api "$GRAPH_API" --api-permissions "$USER_READ=Scope" 2>/dev/null || true
+    echo "Adding User.Read..."
+    az ad app permission add --id "$CLIENT_ID" --api "$GRAPH_API" --api-permissions "$USER_READ=Scope" 2>/dev/null || true
 
-echo -e "${GREEN}Permissions configured${NC}"
-echo
+    echo -e "${GREEN}Permissions configured${NC}"
+    echo
+fi
 
 # Step 5: Save config
+mkdir -p "$CONFIG_DIR"
+chmod 700 "$CONFIG_DIR"
 echo -e "${BLUE}Step 5/7: Saving Configuration${NC}"
 
 cat > "$CONFIG_FILE" << EOF
