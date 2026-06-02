@@ -220,7 +220,7 @@ echo
 echo -e "${BLUE}Step 6/7: OAuth Authorization${NC}"
 
 SCOPE="offline_access%20Mail.ReadWrite%20Mail.Send%20Calendars.ReadWrite%20User.Read"
-AUTH_URL="https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=$CLIENT_ID&response_type=code&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient&scope=$SCOPE"
+AUTH_URL="https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=$CLIENT_ID&response_type=code&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient&scope=$SCOPE&prompt=select_account"
 
 echo -e "${YELLOW}Opening browser for Microsoft login...${NC}"
 echo
