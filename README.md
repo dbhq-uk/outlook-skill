@@ -301,8 +301,8 @@ If automated setup fails, see `references/setup.md` for step-by-step Azure Porta
 # Remove skill
 rm -rf ~/.claude/skills/outlook
 
-# Remove credentials
-rm -rf ~/.outlook-mcp
+# Remove credentials (all accounts)
+rm -rf ~/.outlook
 
 # Optionally delete Azure app registration
 az ad app delete --id <your-app-id>
