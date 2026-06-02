@@ -3,13 +3,42 @@
 
 set -e
 
-CONFIG_DIR="$HOME/.outlook"
+BASE_DIR="$HOME/.outlook"
+
+# Account resolution: --account/-a flag wins, else OUTLOOK_ACCOUNT env, else "default"
+ACCOUNT="${OUTLOOK_ACCOUNT:-default}"
+if [ "$1" = "--account" ] || [ "$1" = "-a" ]; then
+    ACCOUNT="$2"; shift 2
+fi
+
+# One-time migration: legacy flat config -> default/
+if [ -f "$BASE_DIR/config.json" ] && [ ! -d "$BASE_DIR/default" ]; then
+    mkdir -p "$BASE_DIR/default"
+    mv "$BASE_DIR/config.json" "$BASE_DIR/credentials.json" "$BASE_DIR/id_cache.json" \
+       "$BASE_DIR/default/" 2>/dev/null || true
+fi
+
+# `list` must work without a configured account, so handle it before the config check.
+if [ "$1" = "list" ]; then
+    echo "Configured accounts:"
+    found=0
+    for dir in "$BASE_DIR"/*/; do
+        [ -f "$dir/credentials.json" ] || continue
+        echo "  - $(basename "$dir")"
+        found=1
+    done
+    [ "$found" = 0 ] && echo "  (none configured — run outlook-setup.sh)"
+    exit 0
+fi
+
+CONFIG_DIR="$BASE_DIR/$ACCOUNT"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 CREDS_FILE="$CONFIG_DIR/credentials.json"
 
 # Check config exists
 if [ ! -f "$CONFIG_FILE" ]; then
-    echo "Error: Config not found. Run outlook-setup.sh first."
+    echo "Error: Account '$ACCOUNT' not configured."
+    echo "Run: outlook-setup.sh --account $ACCOUNT"
     exit 1
 fi
 
@@ -128,5 +157,8 @@ case "$1" in
         echo "  get        Output current access token"
         echo "  test       Test connection to Outlook"
         echo "  status     Show connection status"
+        echo "  list       List configured accounts"
+        echo
+        echo "Account selection: --account <name> | -a <name> | OUTLOOK_ACCOUNT env (default: default)"
         ;;
 esac
