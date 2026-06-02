@@ -51,6 +51,12 @@ Note: Admin consent is NOT required for delegated permissions with personal/org 
 
 ## Step 5: Create Config Files
 
+> **Multi-account note:** This guide configures the `default` account. Credentials live
+> under `~/.outlook/<account>/`. The flat `~/.outlook/*.json` files below are auto-migrated
+> into `~/.outlook/default/` the first time any script runs, so you can write them flat here.
+> To set up an additional mailbox, prefer `outlook-setup.sh --account <name>`, which reuses
+> this app registration.
+
 Create the config directory:
 
 ```bash

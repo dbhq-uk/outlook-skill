@@ -8,6 +8,7 @@ BASE_DIR="$HOME/.outlook"
 # Account resolution: --account/-a flag wins, else OUTLOOK_ACCOUNT env, else "default"
 ACCOUNT="${OUTLOOK_ACCOUNT:-default}"
 if [ "$1" = "--account" ] || [ "$1" = "-a" ]; then
+    [ -n "$2" ] || { echo "Error: $1 requires an account name" >&2; exit 1; }
     ACCOUNT="$2"; shift 2
 fi
 
