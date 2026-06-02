@@ -233,8 +233,10 @@ Once installed, you can use natural language:
     └── setup.md                # Manual setup guide
 
 ~/.outlook/                 # Credentials (created by setup)
-├── config.json                 # Azure app ID + secret
-└── credentials.json            # OAuth tokens
+└── <account>/              # One dir per account (e.g. default, work)
+    ├── config.json             # Azure app ID + secret
+    ├── credentials.json        # OAuth tokens
+    └── id_cache.json           # Cached message IDs for short-ID lookups
 ```
 
 ## Permissions
