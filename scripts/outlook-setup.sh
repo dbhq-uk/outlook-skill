@@ -41,10 +41,22 @@ echo -e "${BLUE}=== Outlook OAuth Setup ===${NC}"
 echo -e "Account: ${GREEN}$ACCOUNT${NC}"
 echo
 
+# Detect a reusable app registration from an existing account (used later in
+# Step 2, but must be known before the dependency check so we don't block users
+# who lack az but can reuse an existing app).
+REUSE_CONFIG=""
+for dir in "$BASE_DIR"/*/; do
+    other="$dir/config.json"
+    [ "$dir" = "$CONFIG_DIR/" ] && continue
+    [ -f "$other" ] || continue
+    REUSE_CONFIG="$other"
+    break
+done
+
 # Check dependencies
 echo -e "${YELLOW}Checking dependencies...${NC}"
 
-if [ -z "$SKIP_APP_CREATE" ] && ! command -v az &> /dev/null; then
+if [ -z "$REUSE_CONFIG" ] && ! command -v az &> /dev/null; then
     echo -e "${RED}Error: Azure CLI (az) not found${NC}"
     echo "Install: https://docs.microsoft.com/en-us/cli/azure/install-azure-cli"
     exit 1
@@ -90,18 +102,9 @@ fi
 # Step 2: Create or get app registration
 echo -e "${BLUE}Step 2/7: App Registration${NC}"
 
-# Reuse an existing account's app registration when available. The app is
-# multi-tenant + personal-account, so one app can authorize many mailboxes,
-# and additional mailboxes then need no Azure admin rights.
-REUSE_CONFIG=""
-for dir in "$BASE_DIR"/*/; do
-    other="$dir/config.json"
-    [ "$dir" = "$CONFIG_DIR/" ] && continue
-    [ -f "$other" ] || continue
-    REUSE_CONFIG="$other"
-    break
-done
-
+# Offer to reuse an existing account's app registration when one was detected.
+# The app is multi-tenant + personal-account, so one app can authorize many
+# mailboxes, and additional mailboxes then need no Azure admin rights.
 if [ -n "$REUSE_CONFIG" ]; then
     REUSE_NAME=$(basename "$(dirname "$REUSE_CONFIG")")
     echo -e "${YELLOW}Found existing app registration from account '$REUSE_NAME'.${NC}"
