@@ -1292,6 +1292,12 @@ ${existing_body}"
             att_name=$(echo "$att" | jq -r '.name')
             att_size=$(echo "$att" | jq -r '.size')
 
+            # Sanitize server-supplied name: prevent path traversal out of $DOWNLOAD_DIR
+            att_name=$(basename "$att_name" | sed 's/\.\.//g')
+            if [ -z "$att_name" ] || [ "$att_name" = "." ]; then
+                att_name="attachment"
+            fi
+
             # Handle filename collisions
             base_name="${att_name%.*}"
             extension="${att_name##*.}"
