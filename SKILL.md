@@ -163,9 +163,13 @@ Calendar timezone is auto-detected from the system. Override with `OUTLOOK_TZ`, 
 ~/.claude/skills/outlook/scripts/outlook-mail.sh update <draft-id> subject "New subject line"
 ~/.claude/skills/outlook/scripts/outlook-mail.sh update <draft-id> body "Plain text body"
 ~/.claude/skills/outlook/scripts/outlook-mail.sh update <draft-id> mdbody "**Markdown** body"
+# to: replaces the To line. cc/bcc: append to existing (deduped, case-insensitive).
+# All three accept a comma/semicolon-separated list of addresses.
 ~/.claude/skills/outlook/scripts/outlook-mail.sh update <draft-id> to "new-recipient@example.com"
-~/.claude/skills/outlook/scripts/outlook-mail.sh update <draft-id> cc "cc@example.com"
+~/.claude/skills/outlook/scripts/outlook-mail.sh update <draft-id> cc "one@example.com, two@example.com"
 ~/.claude/skills/outlook/scripts/outlook-mail.sh update <draft-id> bcc "bcc@example.com"
+# Pass an empty string to clear all CC/BCC recipients (e.g. to trim a reply-all to sender-only):
+~/.claude/skills/outlook/scripts/outlook-mail.sh update <draft-id> cc ""
 
 # List drafts
 ~/.claude/skills/outlook/scripts/outlook-mail.sh drafts

@@ -208,6 +208,17 @@ resolve_message_id() {
     return 1
 }
 
+# Convert a comma/semicolon-separated address string into a JSON array of
+# Graph recipient objects. Trims surrounding whitespace and drops empties.
+# Usage: arr=$(recipients_to_json "a@x.com, b@y.com; c@z.com")
+recipients_to_json() {
+    jq -n --arg raw "$1" '
+        ($raw | gsub(";"; ",") | split(",")
+            | map(gsub("^\\s+|\\s+$"; ""))
+            | map(select(length > 0))
+            | map({emailAddress: {address: .}}))'
+}
+
 # Commands
 case "$1" in
     inbox)
@@ -536,9 +547,9 @@ ${html_body}
             echo "  subject <text>     Update subject line"
             echo "  body <text>        Replace body (plain text)"
             echo "  mdbody <markdown>  Replace body (markdown -> HTML)"
-            echo "  to <email>         Change recipient"
-            echo "  cc <email>         Add CC recipient"
-            echo "  bcc <email>        Add BCC recipient"
+            echo "  to <emails>        Set To recipient(s) - comma/semicolon-separated; replaces the To line"
+            echo "  cc <emails>        Add CC recipient(s) - comma/semicolon-separated; dedups; empty string clears CC"
+            echo "  bcc <emails>       Add BCC recipient(s) - comma/semicolon-separated; dedups; empty string clears BCC"
             exit 1
         fi
 
@@ -601,28 +612,55 @@ ${html_body}
                     echo "Error: Email address required"
                     exit 1
                 fi
-                echo "Updating recipient..."
-                payload=$(jq -n --arg email "$value" '{toRecipients: [{emailAddress: {address: $email}}]}')
+                # Accepts a comma/semicolon-separated list; replaces the To line.
+                new_recips=$(recipients_to_json "$value")
+                if [ "$(echo "$new_recips" | jq 'length')" -eq 0 ]; then
+                    echo "Error: No valid email address provided"
+                    exit 1
+                fi
+                echo "Updating To recipient(s)..."
+                payload=$(jq -n --argjson arr "$new_recips" '{toRecipients: $arr}')
                 ;;
             cc)
+                # Empty value clears the CC line; otherwise accepts a
+                # comma/semicolon-separated list and appends to existing CC,
+                # skipping addresses already present (case-insensitive) so re-adding
+                # is a no-op rather than creating duplicate/malformed recipients.
                 if [ -z "$value" ]; then
-                    echo "Error: Email address required"
-                    exit 1
+                    echo "Clearing CC recipients..."
+                    payload='{"ccRecipients": []}'
+                else
+                    new_recips=$(recipients_to_json "$value")
+                    if [ "$(echo "$new_recips" | jq 'length')" -eq 0 ]; then
+                        echo "Error: No valid email address provided"
+                        exit 1
+                    fi
+                    echo "Adding CC recipient(s)..."
+                    existing=$(api_call GET "/me/messages/$draft_id?\$select=ccRecipients" | jq '.ccRecipients // []')
+                    payload=$(jq -n --argjson ex "$existing" --argjson new "$new_recips" '
+                        ($ex | map(.emailAddress.address // "" | ascii_downcase)) as $have
+                        | {ccRecipients: ($ex + ($new | map(select((.emailAddress.address // "" | ascii_downcase) as $a | ($have | index($a)) | not))))}')
                 fi
-                echo "Adding CC recipient..."
-                # Get existing CC recipients and add new one
-                existing=$(api_call GET "/me/messages/$draft_id?\$select=ccRecipients" | jq '.ccRecipients // []')
-                payload=$(echo "$existing" | jq --arg email "$value" '. + [{emailAddress: {address: $email}}] | {ccRecipients: .}')
                 ;;
             bcc)
+                # Empty value clears the BCC line; otherwise accepts a
+                # comma/semicolon-separated list and appends to existing BCC,
+                # skipping addresses already present (case-insensitive).
                 if [ -z "$value" ]; then
-                    echo "Error: Email address required"
-                    exit 1
+                    echo "Clearing BCC recipients..."
+                    payload='{"bccRecipients": []}'
+                else
+                    new_recips=$(recipients_to_json "$value")
+                    if [ "$(echo "$new_recips" | jq 'length')" -eq 0 ]; then
+                        echo "Error: No valid email address provided"
+                        exit 1
+                    fi
+                    echo "Adding BCC recipient(s)..."
+                    existing=$(api_call GET "/me/messages/$draft_id?\$select=bccRecipients" | jq '.bccRecipients // []')
+                    payload=$(jq -n --argjson ex "$existing" --argjson new "$new_recips" '
+                        ($ex | map(.emailAddress.address // "" | ascii_downcase)) as $have
+                        | {bccRecipients: ($ex + ($new | map(select((.emailAddress.address // "" | ascii_downcase) as $a | ($have | index($a)) | not))))}')
                 fi
-                echo "Adding BCC recipient..."
-                # Get existing BCC recipients and add new one
-                existing=$(api_call GET "/me/messages/$draft_id?\$select=bccRecipients" | jq '.bccRecipients // []')
-                payload=$(echo "$existing" | jq --arg email "$value" '. + [{emailAddress: {address: $email}}] | {bccRecipients: .}')
                 ;;
             *)
                 echo "Error: Unknown field '$field'"
