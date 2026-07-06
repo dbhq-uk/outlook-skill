@@ -34,7 +34,7 @@ for src in "$SCRIPT_DIR"/skills/*/; do
   [ -d "$src/scripts" ]    && ln -sfn "$src/scripts"    "$target/scripts"
   [ -d "$src/references" ] && ln -sfn "$src/references" "$target/references"
   chmod +x "$src"/scripts/*.sh 2>/dev/null || true
-  sed 's#\${CLAUDE_PLUGIN_ROOT}/skills/'"$name"'#$HOME/.codex/skills/'"$name"'#g' \
+  sed 's#\${CLAUDE_PLUGIN_ROOT}/skills/#$HOME/.codex/skills/#g' \
     "$src/SKILL.md" > "$target/SKILL.md"
 done
 

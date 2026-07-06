@@ -41,8 +41,9 @@ for src in "$SCRIPT_DIR"/skills/*/; do
   [ -d "$src/scripts" ]    && ln -sfn "$src/scripts"    "$target/scripts"
   [ -d "$src/references" ] && ln -sfn "$src/references" "$target/references"
   chmod +x "$src"/scripts/*.sh 2>/dev/null || true
-  # Generate SKILL.md with the plugin-root variable rewritten to the install path
-  sed 's#\${CLAUDE_PLUGIN_ROOT}/skills/'"$name"'#$HOME/.claude/skills/'"$name"'#g' \
+  # Generate SKILL.md with the plugin-root variable rewritten to the install path.
+  # Generic (any skill), so cross-skill references within a pack also resolve.
+  sed 's#\${CLAUDE_PLUGIN_ROOT}/skills/#$HOME/.claude/skills/#g' \
     "$src/SKILL.md" > "$target/SKILL.md"
 done
 
