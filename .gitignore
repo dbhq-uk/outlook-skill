@@ -1,0 +1,13 @@
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Local credentials must never be committed (they live in ~/.outlook, not here)
+.outlook/
+*.token
+inbox/

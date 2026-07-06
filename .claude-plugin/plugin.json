@@ -1,0 +1,13 @@
+{
+  "name": "outlook",
+  "description": "Microsoft 365 email and calendar for Claude Code and Codex - inbox, search, drafts, reply-all-safe replies, attachments up to 150 MB, calendar and availability, via the Microsoft Graph API.",
+  "version": "1.0.0",
+  "author": {
+    "name": "DBHQ",
+    "email": "dan@dbhq.uk"
+  },
+  "homepage": "https://dbhq.uk",
+  "repository": "https://github.com/dbhq-uk/outlook",
+  "license": "MIT",
+  "keywords": ["outlook", "microsoft-365", "email", "calendar", "graph-api", "office365"]
+}
