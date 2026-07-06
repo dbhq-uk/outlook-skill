@@ -57,6 +57,10 @@ cd outlook-skill
 
 First run launches `outlook-setup.sh`, which registers an Azure app and authenticates you via OAuth. Credentials are stored per account under `~/.outlook/<account>/` and never leave your machine. Tokens refresh automatically. See [`skills/outlook/references/setup.md`](skills/outlook/references/setup.md) for manual steps.
 
+## Development
+
+Want to hack on this skill or run it from source with live edits? See [`docs/dev-setup.md`](docs/dev-setup.md).
+
 ## Requirements
 
 `azure-cli` · `jq` · `curl` · `pandoc` (optional, for markdown-formatted emails)
