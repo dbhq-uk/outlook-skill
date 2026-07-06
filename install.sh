@@ -1,104 +1,65 @@
 #!/bin/bash
-# Install Outlook skill to ~/.claude/skills/outlook
-# Run from the tools/outlook directory
+# Install the Outlook skill into ~/.claude/skills/ as a live symlink install.
+#
+# The committed skill is plugin-native: SKILL.md references scripts via
+# ${CLAUDE_PLUGIN_ROOT}, which Claude Code substitutes for marketplace/plugin
+# installs. For a local symlink install (edit-and-see-live), this script rewrites
+# that variable to the installed path and symlinks the scripts so your edits are
+# immediately live. Re-run this script after editing a SKILL.md.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET_DIR="$HOME/.claude/skills/outlook"
+SKILLS_ROOT="$HOME/.claude/skills"
 
-echo "=== Outlook Skill Installer ==="
+echo "=== Outlook skill installer (Claude Code) ==="
 echo
 
-# Check dependencies
-echo "Checking dependencies..."
+# --- Dependencies ---
 MISSING=""
-
-if ! command -v az &> /dev/null; then
-    MISSING="$MISSING azure-cli"
-fi
-
-if ! command -v jq &> /dev/null; then
-    MISSING="$MISSING jq"
-fi
-
-if ! command -v curl &> /dev/null; then
-    MISSING="$MISSING curl"
-fi
-
+command -v az >/dev/null 2>&1   || MISSING="$MISSING azure-cli"
+command -v jq >/dev/null 2>&1   || MISSING="$MISSING jq"
+command -v curl >/dev/null 2>&1 || MISSING="$MISSING curl"
 if [ -n "$MISSING" ]; then
-    echo "Missing required dependencies:$MISSING"
-    echo
-    echo "Install with:"
-    echo "  macOS: brew install$MISSING"
-    echo "  Ubuntu: sudo apt install$MISSING"
-    exit 1
+  echo "Missing required dependencies:$MISSING"
+  echo "  macOS:  brew install$MISSING"
+  echo "  Ubuntu: sudo apt install$MISSING"
+  exit 1
 fi
-
-echo "All required dependencies found"
-
-# Optional dependency check
-if ! command -v pandoc &> /dev/null; then
-    echo "Optional: pandoc not found (needed for markdown-formatted emails)"
-    echo "  Install with: brew install pandoc (macOS) or apt install pandoc (Linux)"
-fi
+command -v pandoc >/dev/null 2>&1 || echo "Optional: pandoc not found (needed for markdown-formatted emails)."
+echo "Dependencies OK."
 echo
 
-# Check for existing installation
-if [ -d "$TARGET_DIR" ]; then
-    echo "Existing installation found at $TARGET_DIR"
-    read -p "Overwrite? (y/N): " overwrite
-    if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
-        echo "Installation cancelled"
-        exit 0
-    fi
-    rm -rf "$TARGET_DIR"
-fi
+# --- Install each skill in this repo ---
+for src in "$SCRIPT_DIR"/skills/*/; do
+  src="${src%/}"
+  name="$(basename "$src")"
+  target="$SKILLS_ROOT/$name"
+  echo "Installing '$name' -> $target"
+  mkdir -p "$target"
+  # Live symlinks for the parts you edit often
+  [ -d "$src/scripts" ]    && ln -sfn "$src/scripts"    "$target/scripts"
+  [ -d "$src/references" ] && ln -sfn "$src/references" "$target/references"
+  chmod +x "$src"/scripts/*.sh 2>/dev/null || true
+  # Generate SKILL.md with the plugin-root variable rewritten to the install path
+  sed 's#\${CLAUDE_PLUGIN_ROOT}/skills/'"$name"'#$HOME/.claude/skills/'"$name"'#g' \
+    "$src/SKILL.md" > "$target/SKILL.md"
+done
 
-# Create target directory
-echo "Installing to $TARGET_DIR..."
-mkdir -p "$TARGET_DIR/scripts"
-mkdir -p "$TARGET_DIR/references"
-
-# Copy files
-cp "$SCRIPT_DIR/SKILL.md" "$TARGET_DIR/"
-cp "$SCRIPT_DIR/scripts/"* "$TARGET_DIR/scripts/"
-cp "$SCRIPT_DIR/references/"* "$TARGET_DIR/references/"
-
-# Make scripts executable
-chmod +x "$TARGET_DIR/scripts/"*.sh
-
-echo "Skill installed!"
+echo
+echo "Installed. Scripts are symlinked (edits are live); re-run this script after editing a SKILL.md."
 echo
 
-# Check if already configured
-if [ -f "$HOME/.outlook/credentials.json" ]; then
-    echo "Existing credentials found. Testing connection..."
-    if "$TARGET_DIR/scripts/outlook-token.sh" test; then
-        echo
-        echo "=== Installation Complete ==="
-        echo "Outlook skill is ready to use."
-    else
-        echo
-        echo "Credentials exist but connection failed."
-        read -p "Run setup to re-authenticate? (Y/n): " run_setup
-        if [[ ! "$run_setup" =~ ^[Nn]$ ]]; then
-            "$TARGET_DIR/scripts/outlook-setup.sh"
-        fi
-    fi
+# --- Setup / credentials ---
+SETUP="$SKILLS_ROOT/outlook/scripts/outlook-setup.sh"
+if [ -f "$HOME/.outlook/default/credentials.json" ] || [ -f "$HOME/.outlook/credentials.json" ]; then
+  echo "Existing Outlook credentials found. Re-run setup any time with:"
+  echo "  $SETUP"
 else
-    echo "No credentials found. Running setup..."
-    echo
-    "$TARGET_DIR/scripts/outlook-setup.sh"
+  echo "No credentials found. Launching setup..."
+  echo
+  "$SETUP" || echo "Setup skipped or failed; run '$SETUP' when ready."
 fi
 
 echo
-echo "=== Done ==="
-echo
-echo "Try these commands:"
-echo "  Check email:    ~/.claude/skills/outlook/scripts/outlook-mail.sh inbox"
-echo "  Today's calendar: ~/.claude/skills/outlook/scripts/outlook-calendar.sh today"
-echo
-echo "Or use natural language in Claude Code:"
-echo "  'check my email'"
-echo "  'what's on my calendar today'"
+echo "Done. Try: 'check my email' or 'what's on my calendar today'"

@@ -1,311 +1,70 @@
-# Outlook Email & Calendar Integration
+<div align="center">
 
-Access Microsoft 365 Outlook email and calendar from Claude Code via Microsoft Graph API.
+# 📬 Outlook for Claude Code
+
+**Microsoft 365 email and calendar in your terminal - driven by Claude Code or Codex, powered by the Microsoft Graph API**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-Plugin-blueviolet)](https://code.claude.com/docs/en/plugins)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20WSL-lightgrey)]()
+
+A free, open-source tool by [DBHQ](https://dbhq.uk)
+
+</div>
+
+---
+
+Read your inbox, draft and send properly formatted replies, manage attachments up to 150 MB, and work with your calendar - all from Claude Code or Codex, in plain language. Multi-account, OAuth-based, and built with the safety rails that matter for real correspondence.
+
+## Why it is different
+
+- **Reply-all by default** - replies preserve every original `To:` and `Cc:` recipient, so you never silently drop someone from a thread. Trim to sender-only when you actually mean to.
+- **Reads the whole message, never the preview** - the skill is instructed to open the full body end-to-end before summarising or replying, so deadlines, attachments and requests buried below the fold are not missed.
+- **Time-aware** - anchors "today", "tomorrow" and "by EOD" against the real clock and tracks BST vs UTC, so scheduled sends and deadline maths are correct.
+- **Professional formatting** - markdown drafts convert to clean HTML with inline styles that survive Outlook's rendering.
 
 ## Features
 
-**Email:**
-- List inbox, unread, filtered by sender
-- Search emails
-- Read full message content
-- Create drafts in Outlook (plain text or markdown-formatted)
-- Send emails (with confirmation)
-- Download and attach files (up to 150MB)
-- Archive, delete, mark read/unread
+- Inbox, unread, focused, sent, search, and any folder by name
+- Full-message reading with attachment listing and download
+- Plain and markdown drafts, reply-all-safe replies, follow-up chasers
+- Attachments up to 150 MB (automatic chunked upload)
+- Folder management, archive, move, mark read/unread
+- Calendar: upcoming, today, this week, event details, quick-create, free/busy
+- Multiple accounts, selected by flag or environment variable
 
-**Calendar:**
-- View today's events, week view, upcoming
-- Check availability (free/busy)
-- Create events (with confirmation)
-- Update and delete events
+## Install
 
-## Quick Start
+### As a Claude Code plugin (recommended)
 
-### 1. Install Dependencies
+```
+/plugin marketplace add dbhq-uk/marketplace
+/plugin install outlook@dbhq
+```
+
+Then run the one-time setup the skill points you to, and talk to it in plain language: *"check my email"*, *"draft a reply to the last message from Sam"*, *"am I free Thursday afternoon"*.
+
+### Local install (Claude Code or Codex)
 
 ```bash
-# macOS
-brew install azure-cli jq curl pandoc
-
-# Ubuntu/Debian
-sudo apt install azure-cli jq curl pandoc
-
-# Or install Azure CLI: https://docs.microsoft.com/en-us/cli/azure/install-azure-cli
+git clone https://github.com/dbhq-uk/outlook.git
+cd outlook
+./install.sh          # Claude Code: symlinks into ~/.claude/skills (edits are live)
+./install-codex.sh    # Codex: installs into ~/.codex/skills
 ```
 
-**Note:** `pandoc` is optional - only needed for markdown-formatted emails (`mddraft` command).
+## Setup
 
-### 2. Install the Skill
+First run launches `outlook-setup.sh`, which registers an Azure app and authenticates you via OAuth. Credentials are stored per account under `~/.outlook/<account>/` and never leave your machine. Tokens refresh automatically. See [`skills/outlook/references/setup.md`](skills/outlook/references/setup.md) for manual steps.
 
-From the repo root:
+## Requirements
 
-```bash
-./install.sh outlook
-```
+`azure-cli` · `jq` · `curl` · `pandoc` (optional, for markdown-formatted emails)
 
-Or manually:
+## Credentials and privacy
 
-```bash
-mkdir -p ~/.claude/skills/outlook
-cp -r outlook/* ~/.claude/skills/outlook/
-chmod +x ~/.claude/skills/outlook/scripts/*.sh
-```
+No secrets live in this repository. Your tokens are stored locally under `~/.outlook/` and used only to talk to Microsoft Graph directly from your machine.
 
-### 3. Run Setup
+## License
 
-```bash
-~/.claude/skills/outlook/scripts/outlook-setup.sh
-```
-
-This will:
-1. Log you into Azure
-2. Create an app registration with required permissions
-3. Open browser for M365 consent
-4. Store credentials securely in `~/.outlook/`
-5. Test the connection
-
-### 4. Verify
-
-```bash
-~/.claude/skills/outlook/scripts/outlook-token.sh test
-```
-
-Should show:
-```
-Connection successful!
-Inbox: X total, Y unread
-```
-
-## Usage
-
-### Email Commands
-
-```bash
-# List inbox
-~/.claude/skills/outlook/scripts/outlook-mail.sh inbox [count]
-
-# Unread only
-~/.claude/skills/outlook/scripts/outlook-mail.sh unread [count]
-
-# Filter by sender
-~/.claude/skills/outlook/scripts/outlook-mail.sh from "john@example.com" [count]
-
-# Search
-~/.claude/skills/outlook/scripts/outlook-mail.sh search "project update" [count]
-
-# Read full message
-~/.claude/skills/outlook/scripts/outlook-mail.sh read <message-id>
-
-# Create plain text draft
-~/.claude/skills/outlook/scripts/outlook-mail.sh draft "to@example.com" "Subject" "Body"
-
-# Create markdown-formatted draft (converts to HTML via pandoc)
-~/.claude/skills/outlook/scripts/outlook-mail.sh mddraft "to@example.com" "Subject" "**Bold** and _italic_ text"
-
-# Reply (creates draft)
-~/.claude/skills/outlook/scripts/outlook-mail.sh reply <message-id> "Reply body"
-
-# Send draft
-~/.claude/skills/outlook/scripts/outlook-mail.sh send <draft-id>
-
-# List drafts
-~/.claude/skills/outlook/scripts/outlook-mail.sh drafts
-
-# Management
-~/.claude/skills/outlook/scripts/outlook-mail.sh markread <id>
-~/.claude/skills/outlook/scripts/outlook-mail.sh markunread <id>
-~/.claude/skills/outlook/scripts/outlook-mail.sh archive <id>
-~/.claude/skills/outlook/scripts/outlook-mail.sh delete <id>
-
-# Folders & stats
-~/.claude/skills/outlook/scripts/outlook-mail.sh folders
-~/.claude/skills/outlook/scripts/outlook-mail.sh stats
-```
-
-### Calendar Commands
-
-```bash
-# View events
-~/.claude/skills/outlook/scripts/outlook-calendar.sh events [count]
-~/.claude/skills/outlook/scripts/outlook-calendar.sh today
-~/.claude/skills/outlook/scripts/outlook-calendar.sh week
-
-# Read event details
-~/.claude/skills/outlook/scripts/outlook-calendar.sh read <event-id>
-
-# List calendars
-~/.claude/skills/outlook/scripts/outlook-calendar.sh calendars
-
-# Create event (times in YYYY-MM-DDTHH:MM format)
-~/.claude/skills/outlook/scripts/outlook-calendar.sh create "Subject" "2025-02-05T14:00" "2025-02-05T15:00" "Location"
-
-# Quick 1-hour event
-~/.claude/skills/outlook/scripts/outlook-calendar.sh quick "Meeting" "2025-02-05T14:00"
-
-# Check availability
-~/.claude/skills/outlook/scripts/outlook-calendar.sh free "2025-02-05T09:00" "2025-02-05T17:00"
-
-# Update event
-~/.claude/skills/outlook/scripts/outlook-calendar.sh update <id> subject "New Subject"
-~/.claude/skills/outlook/scripts/outlook-calendar.sh update <id> location "New Location"
-~/.claude/skills/outlook/scripts/outlook-calendar.sh update <id> start "2025-02-05T15:00"
-
-# Delete event
-~/.claude/skills/outlook/scripts/outlook-calendar.sh delete <event-id>
-```
-
-### Multiple Accounts
-
-Each account stores credentials under `~/.outlook/<account>/`. The active account is selected by (in order of precedence): `--account <name>` / `-a <name>` flag, the `OUTLOOK_ACCOUNT` env var, then `default`.
-
-```bash
-# Default account
-~/.claude/skills/outlook/scripts/outlook-mail.sh inbox
-
-# Named account (flag)
-~/.claude/skills/outlook/scripts/outlook-mail.sh -a work inbox
-
-# Named account (env var)
-OUTLOOK_ACCOUNT=work ~/.claude/skills/outlook/scripts/outlook-mail.sh inbox
-
-# List configured accounts
-~/.claude/skills/outlook/scripts/outlook-token.sh list
-
-# Add a new account (reuses existing Azure app registration if one is already configured)
-~/.claude/skills/outlook/scripts/outlook-setup.sh --account work
-```
-
-An existing single-account install at `~/.outlook/{config,credentials,id_cache}.json` is auto-migrated to `~/.outlook/default/` on the first run of any script — no manual action needed.
-
-**Calendar timezone** is auto-detected from the system (`/etc/timezone`, `timedatectl`, or `/etc/localtime`). Override per-run with the `OUTLOOK_TZ` env var:
-
-```bash
-OUTLOOK_TZ=America/New_York ~/.claude/skills/outlook/scripts/outlook-calendar.sh today
-```
-
-### Token Management
-
-```bash
-# Test connection
-~/.claude/skills/outlook/scripts/outlook-token.sh test
-
-# Refresh expired token
-~/.claude/skills/outlook/scripts/outlook-token.sh refresh
-
-# Check status
-~/.claude/skills/outlook/scripts/outlook-token.sh status
-
-# Get raw token (for debugging)
-~/.claude/skills/outlook/scripts/outlook-token.sh get
-```
-
-## Natural Language (via Claude)
-
-Once installed, you can use natural language:
-
-| You say | What happens |
-|---------|--------------|
-| "check email" | Lists recent inbox |
-| "show unread" | Lists unread emails |
-| "emails from John" | Filters by sender |
-| "search email for invoice" | Searches content |
-| "capture email 3" | Saves to brain's inbox/ |
-| "draft email to X about Y" | Creates Outlook draft |
-| "draft formatted email to X" | Creates markdown-formatted draft |
-| "reply to that saying Z" | Creates reply draft |
-| "send it" | Sends after confirmation |
-| "what's on today" | Shows today's calendar |
-| "my week" | Shows week view |
-| "am I free Thursday 2pm" | Checks availability |
-| "schedule call with X Tuesday 3pm" | Creates event (with confirm) |
-
-## File Structure
-
-```
-~/.claude/skills/outlook/       # Skill (available everywhere)
-├── SKILL.md                    # Skill definition
-├── scripts/
-│   ├── outlook-setup.sh        # One-time setup
-│   ├── outlook-mail.sh         # Email operations
-│   ├── outlook-calendar.sh     # Calendar operations
-│   └── outlook-token.sh        # Token management
-└── references/
-    └── setup.md                # Manual setup guide
-
-~/.outlook/                 # Credentials (created by setup)
-└── <account>/              # One dir per account (e.g. default, work)
-    ├── config.json             # Azure app ID + secret
-    ├── credentials.json        # OAuth tokens
-    └── id_cache.json           # Cached message IDs for short-ID lookups
-```
-
-## Permissions
-
-The Azure app requires these Microsoft Graph delegated permissions:
-
-| Permission | Purpose |
-|------------|---------|
-| Mail.ReadWrite | Read inbox, manage drafts |
-| Mail.Send | Send emails |
-| Calendars.ReadWrite | Read/create events |
-| offline_access | Refresh tokens without re-login |
-| User.Read | Basic profile info |
-
-## Token Expiry
-
-- **Access tokens** expire after ~1 hour but are **automatically refreshed**
-- **Refresh tokens** last ~90 days with activity
-- No manual intervention needed for token refresh
-- If refresh token expires, re-run setup
-
-## Troubleshooting
-
-### "Refresh token expired" / "Invalid grant"
-Re-run setup:
-```bash
-~/.claude/skills/outlook/scripts/outlook-setup.sh
-```
-
-### "Insufficient privileges"
-1. Go to Azure Portal → App registrations → Your app → API permissions
-2. Verify all permissions are listed
-3. Remove and re-add if needed
-4. Re-run setup to re-consent
-
-### "Message not found"
-- Message IDs are the last 20 characters of full IDs
-- IDs from `inbox` command work with `read`, `reply`, etc.
-- Scripts search recent 100 messages when looking up short IDs
-
-### Connection issues
-```bash
-# Check status
-~/.claude/skills/outlook/scripts/outlook-token.sh status
-
-# Test connection
-~/.claude/skills/outlook/scripts/outlook-token.sh test
-```
-
-## Manual Setup
-
-If automated setup fails, see `references/setup.md` for step-by-step Azure Portal instructions.
-
-## Security Notes
-
-- Credentials stored with 600 permissions (owner read/write only)
-- Client secret valid for 2 years (configurable in Azure)
-- Never commit `~/.outlook/` to version control
-- Revoke app access: Azure Portal → Enterprise applications → Your app → Delete
-
-## Uninstall
-
-```bash
-# Remove skill
-rm -rf ~/.claude/skills/outlook
-
-# Remove credentials (all accounts)
-rm -rf ~/.outlook
-
-# Optionally delete Azure app registration
-az ad app delete --id <your-app-id>
-```
+[MIT](LICENSE) © 2026 DBHQ Consulting Ltd
