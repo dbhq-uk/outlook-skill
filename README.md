@@ -47,8 +47,8 @@ Then run the one-time setup the skill points you to, and talk to it in plain lan
 ### Local install (Claude Code or Codex)
 
 ```bash
-git clone https://github.com/dbhq-uk/outlook.git
-cd outlook
+git clone https://github.com/dbhq-uk/outlook-skill.git
+cd outlook-skill
 ./install.sh          # Claude Code: symlinks into ~/.claude/skills (edits are live)
 ./install-codex.sh    # Codex: installs into ~/.codex/skills
 ```
