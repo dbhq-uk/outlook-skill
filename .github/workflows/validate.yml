@@ -1,0 +1,50 @@
+name: Validate plugin
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate plugin manifest is valid JSON
+        run: jq empty .claude-plugin/plugin.json
+
+      - name: Check shell scripts parse
+        run: |
+          fail=0
+          while IFS= read -r s; do
+            bash -n "$s" || { echo "Syntax error: $s"; fail=1; }
+          done < <(find skills -name '*.sh')
+          exit $fail
+
+      - name: Check SKILL.md frontmatter
+        run: |
+          python3 - <<'PY'
+          import sys, pathlib, re
+          ok = True
+          for skill in sorted(pathlib.Path("skills").glob("*/SKILL.md")):
+              text = skill.read_text(encoding="utf-8")
+              m = re.match(r"^---\n(.*?)\n---", text, re.S)
+              if not m:
+                  print(f"{skill}: missing YAML frontmatter"); ok = False; continue
+              fm = m.group(1)
+              name = re.search(r"^name:\s*(.+)$", fm, re.M)
+              desc = re.search(r"^description:\s*(.+)$", fm, re.M)
+              if not name:
+                  print(f"{skill}: missing 'name'"); ok = False
+              else:
+                  name = name.group(1).strip()
+                  if name != skill.parent.name:
+                      print(f"{skill}: name '{name}' != directory '{skill.parent.name}'"); ok = False
+                  if not re.fullmatch(r"[a-z0-9-]{1,64}", name):
+                      print(f"{skill}: name must be lowercase alphanumeric/hyphen, <=64 chars"); ok = False
+              if not desc:
+                  print(f"{skill}: missing 'description'"); ok = False
+              elif len(desc.group(1).strip()) > 1024:
+                  print(f"{skill}: description exceeds 1024 chars"); ok = False
+          sys.exit(0 if ok else 1)
+          PY
