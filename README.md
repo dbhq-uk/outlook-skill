@@ -1,6 +1,8 @@
 <div align="center">
 
-# 📬 Outlook for Claude Code
+<img src="assets/logo.svg" alt="Outlook skill for Claude Code, by DBHQ" width="420">
+
+# Outlook for Claude Code
 
 **Microsoft 365 email and calendar in your terminal - driven by Claude Code or Codex, powered by the Microsoft Graph API**
 
