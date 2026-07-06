@@ -4,14 +4,14 @@ Thanks for your interest - contributions are welcome.
 
 ## Ways to help
 
-- Report a bug or request a feature via [issues](https://github.com/dbhq-uk/outlook/issues)
+- Report a bug or request a feature via [issues](https://github.com/dbhq-uk/outlook-skill/issues)
 - Improve the skill instructions or scripts via a pull request
 
 ## Local development
 
 ```bash
-git clone https://github.com/dbhq-uk/outlook.git
-cd outlook
+git clone https://github.com/dbhq-uk/outlook-skill.git
+cd outlook-skill
 ./install.sh          # symlinks into ~/.claude/skills (edits are live)
 ```
 

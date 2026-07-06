@@ -7,7 +7,7 @@
     "email": "dan@dbhq.uk"
   },
   "homepage": "https://dbhq.uk",
-  "repository": "https://github.com/dbhq-uk/outlook",
+  "repository": "https://github.com/dbhq-uk/outlook-skill",
   "license": "MIT",
   "keywords": ["outlook", "microsoft-365", "email", "calendar", "graph-api", "office365"]
 }
