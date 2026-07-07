@@ -69,24 +69,24 @@ Each account stores credentials under `~/.outlook/<account>/`. The active accoun
 
 ```bash
 # Default account
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh inbox
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh inbox
 
 # Named account (flag)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh -a work inbox
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh -a work inbox
 
 # Named account (env var)
-OUTLOOK_ACCOUNT=work ${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh inbox
+OUTLOOK_ACCOUNT=work ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh inbox
 
 # List configured accounts
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-token.sh list
+${CLAUDE_SKILL_DIR}/scripts/outlook-token.sh list
 
 # Add a new account (reuses existing Azure app registration if one exists)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-setup.sh --account work
+${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh --account work
 ```
 
 An existing single-account install at `~/.outlook/{config,credentials,id_cache}.json` is auto-migrated to `~/.outlook/default/` on the first run of any script.
 
-Calendar timezone is auto-detected from the system. Override with `OUTLOOK_TZ`, e.g. `OUTLOOK_TZ=America/New_York ${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-calendar.sh today`.
+Calendar timezone is auto-detected from the system. Override with `OUTLOOK_TZ`, e.g. `OUTLOOK_TZ=America/New_York ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh today`.
 
 ## Prerequisites
 
@@ -101,78 +101,78 @@ Calendar timezone is auto-detected from the system. Override with `OUTLOOK_TZ`, 
 
 ```bash
 # List inbox (default 10 messages)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh inbox
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh inbox
 
 # List more messages
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh inbox 25
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh inbox 25
 
 # Unread only
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh unread
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh unread
 
 # Focused inbox only
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh focused
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh focused
 
 # List sent items (your sent emails)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh sent
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh sent 25
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh sent
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh sent 25
 
 # List messages from any folder by name (searches recursively)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh folder "Projects" 20
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh folder "Projects" 20
 
 # Filter by sender
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh from "john@example.com"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh from "john@example.com"
 
 # Search emails
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh search "project update"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search "project update"
 
 # Read full message (use ID from list)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh read <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh read <message-id>
 
 # Quick preview (subject, from, date, body preview)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh preview <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh preview <message-id>
 ```
 
 ### Sending Email
 
 ```bash
 # Create plain text draft
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh draft "recipient@example.com" "Subject" "Body text"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh draft "recipient@example.com" "Subject" "Body text"
 
 # Create markdown-formatted draft (converts to HTML)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh mddraft "recipient@example.com" "Subject" "**Bold** and _italic_ text"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mddraft "recipient@example.com" "Subject" "**Bold** and _italic_ text"
 
 # Send a draft (use draft ID)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh send <draft-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send <draft-id>
 
 # Reply to a message (plain text - creates draft, REPLY-ALL: includes original To: + Cc:)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh reply <message-id> "Reply body"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh reply <message-id> "Reply body"
 
 # Reply with markdown formatting (converts to HTML - creates draft, REPLY-ALL: includes original To: + Cc:)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh mdreply <message-id> "**Bold** reply with _formatting_"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mdreply <message-id> "**Bold** reply with _formatting_"
 
 # (For sender-only reply, create the draft then trim recipients via `update to`/`update cc`.)
 
 # Send reply draft
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh send <reply-draft-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send <reply-draft-id>
 
 # Follow up on your own sent email (chaser)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh followup <sent-message-id>
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh followup <sent-message-id> "Custom follow-up body in **markdown**"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup <sent-message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup <sent-message-id> "Custom follow-up body in **markdown**"
 
 # Update an existing draft
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh update <draft-id> subject "New subject line"
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh update <draft-id> body "Plain text body"
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh update <draft-id> mdbody "**Markdown** body"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> subject "New subject line"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> body "Plain text body"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> mdbody "**Markdown** body"
 # to: replaces the To line. cc/bcc: append to existing (deduped, case-insensitive).
 # All three accept a comma/semicolon-separated list of addresses.
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh update <draft-id> to "new-recipient@example.com"
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh update <draft-id> cc "one@example.com, two@example.com"
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh update <draft-id> bcc "bcc@example.com"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> to "new-recipient@example.com"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> cc "one@example.com, two@example.com"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> bcc "bcc@example.com"
 # Pass an empty string to clear all CC/BCC recipients (e.g. to trim a reply-all to sender-only):
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh update <draft-id> cc ""
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> cc ""
 
 # List drafts
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh drafts
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh drafts
 ```
 
 **Note:** `mddraft`, `mdreply`, and `update mdbody` require `pandoc` for markdown conversion. Install with `brew install pandoc` (macOS) or `apt install pandoc` (Linux).
@@ -186,19 +186,19 @@ ${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh drafts
 **Reading attachments:**
 ```bash
 # List attachments on a message
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh attachments <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attachments <message-id>
 
 # Download ALL attachments to ./inbox/
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh download <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh download <message-id>
 
 # Download specific attachment
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh download <message-id> <attachment-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh download <message-id> <attachment-id>
 ```
 
 **Adding attachments to drafts:**
 ```bash
 # Add attachment to a draft (supports files up to 150MB)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh attach <draft-id> <file-path>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attach <draft-id> <file-path>
 ```
 
 Upload method is automatic based on file size:
@@ -211,41 +211,41 @@ Multiple attachments can be added by calling `attach` multiple times on the same
 
 ```bash
 # Mark as read
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh markread <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh markread <message-id>
 
 # Mark as unread
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh markunread <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh markunread <message-id>
 
 # Delete
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh delete <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh delete <message-id>
 
 # Archive
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh archive <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh archive <message-id>
 
 # Move to any folder (searches by name, supports nested folders)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh move <message-id> "Projects"
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh move <message-id> "Clients/Acme"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh move <message-id> "Projects"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh move <message-id> "Clients/Acme"
 ```
 
 ### Folder Management
 
 ```bash
 # List top-level folders
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh folders
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh folders
 
 # List subfolders of a folder (default: inbox)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh subfolders
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh subfolders "Important"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh subfolders
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh subfolders "Important"
 
 # Create a new top-level folder
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh mkdir "Projects"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Projects"
 
 # Create a subfolder under an existing folder
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh mkdir "Acme" "Clients"
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh mkdir "Urgent" inbox
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Acme" "Clients"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Urgent" inbox
 
 # Inbox statistics (total, unread counts)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh stats
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh stats
 ```
 
 ## Calendar Operations
@@ -254,36 +254,36 @@ ${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh stats
 
 ```bash
 # Upcoming events (default 10)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-calendar.sh events
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh events
 
 # Today's events
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-calendar.sh today
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh today
 
 # This week
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-calendar.sh week
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh week
 
 # Read event details
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-calendar.sh read <event-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh read <event-id>
 
 # List calendars
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-calendar.sh calendars
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh calendars
 ```
 
 ### Creating Events
 
 ```bash
 # Create event (dates in YYYY-MM-DDTHH:MM format)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-calendar.sh create "Meeting subject" "2025-02-05T14:00" "2025-02-05T15:00" "Conference Room A"
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh create "Meeting subject" "2025-02-05T14:00" "2025-02-05T15:00" "Conference Room A"
 
 # Quick 1-hour event
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-calendar.sh quick "Team standup" "2025-02-05T09:00"
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh quick "Team standup" "2025-02-05T09:00"
 ```
 
 ### Availability
 
 ```bash
 # Check free/busy
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-calendar.sh free "2025-02-05T09:00" "2025-02-05T17:00"
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh free "2025-02-05T09:00" "2025-02-05T17:00"
 ```
 
 ## Workflow: Capturing Email to Notes
@@ -344,15 +344,15 @@ Always draft first, confirm, then send:
 **Example:**
 ```bash
 # Create draft
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh draft "bob@example.com" "Q4 Report" "Please find the report attached."
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh draft "bob@example.com" "Q4 Report" "Please find the report attached."
 # Output: Draft ID: xxxxxxxxxxxxxxxxxxxx
 
 # Attach files (can be called multiple times)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh attach xxxxxxxxxxxxxxxxxxxx /path/to/report.pdf
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh attach xxxxxxxxxxxxxxxxxxxx /path/to/data.xlsx
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attach xxxxxxxxxxxxxxxxxxxx /path/to/report.pdf
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attach xxxxxxxxxxxxxxxxxxxx /path/to/data.xlsx
 
 # Send after user confirms
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh send xxxxxxxxxxxxxxxxxxxx
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send xxxxxxxxxxxxxxxxxxxx
 ```
 
 ## Workflow: Sending Follow-up / Chaser Emails
@@ -368,16 +368,16 @@ When user wants to follow up on an email they sent:
 **Example:**
 ```bash
 # Find the original sent email
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh sent 20
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh sent 20
 
 # Create follow-up draft (default body)
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh followup abc123xyz
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup abc123xyz
 
 # Or with custom message
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh followup abc123xyz "Hi, just checking in on this. Would be great to get your thoughts when you have a moment."
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup abc123xyz "Hi, just checking in on this. Would be great to get your thoughts when you have a moment."
 
 # Send after user confirms
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-mail.sh send <draft-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send <draft-id>
 ```
 
 ## Workflow: Creating Calendar Events
@@ -399,7 +399,7 @@ Always confirm before creating:
 
 If not configured, run:
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-setup.sh
+${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh
 ```
 
 See `references/setup.md` for manual setup instructions.

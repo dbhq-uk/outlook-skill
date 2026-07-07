@@ -120,7 +120,7 @@ chmod 600 ~/.outlook/credentials.json
 Test the connection:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/skills/outlook/scripts/outlook-token.sh test
+${CLAUDE_SKILL_DIR}/scripts/outlook-token.sh test
 ```
 
 You should see:
@@ -156,4 +156,4 @@ Tokens are automatically refreshed. If you see this error, it means the refresh 
 |------|---------|
 | `~/.outlook/config.json` | Azure app credentials |
 | `~/.outlook/credentials.json` | OAuth tokens |
-| `${CLAUDE_PLUGIN_ROOT}/skills/outlook/` | Skill and scripts |
+| `${CLAUDE_SKILL_DIR}/` | Skill and scripts |
