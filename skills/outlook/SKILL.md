@@ -225,7 +225,19 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh archive <message-id>
 # Move to any folder (searches by name, supports nested folders)
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh move <message-id> "Projects"
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh move <message-id> "Clients/Acme"
+
+# Move MANY messages at once (batches of 20 via the Graph $batch endpoint).
+# The destination folder is resolved once, so this is far faster than looping
+# `move`. IDs may be passed as arguments or piped via stdin.
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh batch-move "Projects" <id1> <id2> <id3>
+# Pipe IDs from a listing (one per line or space-separated):
+some_command_that_prints_ids | ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh batch-move "Projects"
 ```
+
+**Bulk sorting note:** to reorganise a whole inbox, list messages, group their
+IDs by destination folder, then call `batch-move` once per folder (piping the
+IDs). Moving a message assigns it a NEW id in the destination folder, so if you
+need to move it again, re-fetch ids from the destination folder first.
 
 ### Folder Management
 
@@ -243,6 +255,14 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Projects"
 # Create a subfolder under an existing folder
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Acme" "Clients"
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Urgent" inbox
+
+# Rename a folder (refuses well-known system folders)
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rename "Old Name" "New Name"
+
+# Delete a folder (refuses non-empty folders unless --force; refuses system
+# folders always). With --force, contents move to Deleted Items.
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rmdir "Empty Folder"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rmdir "Old Folder" --force
 
 # Inbox statistics (total, unread counts)
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh stats

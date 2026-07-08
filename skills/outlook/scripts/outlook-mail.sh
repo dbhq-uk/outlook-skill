@@ -111,6 +111,37 @@ cache_message_ids() {
     echo "$response" | jq -c '[.value[].id // empty]' > "$ID_CACHE_FILE" 2>/dev/null || true
 }
 
+# Resolve a folder name to its ID: well-known names, then top-level folders,
+# then nested under inbox (levels 2 and 3). Prints the ID and returns 0 on a
+# match, returns 1 on no match. Shared by batch-move; the single-message `move`
+# keeps its own inline copy so its behaviour is untouched.
+resolve_folder_id() {
+    local search_name="$1"
+    local folder_id=""
+
+    case "$search_name" in
+        inbox|drafts|sentitems|deleteditems|archive|junkemail)
+            folder_id=$(api_call GET "/me/mailFolders/$search_name" | jq -r '.id // empty')
+            [ -n "$folder_id" ] && { echo "$folder_id"; return 0; }
+            ;;
+    esac
+
+    folder_id=$(api_call GET "/me/mailFolders?\$top=100" | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' | head -1)
+    [ -n "$folder_id" ] && { echo "$folder_id"; return 0; }
+
+    local inbox_children=$(api_call GET "/me/mailFolders/inbox/childFolders?\$top=100")
+    folder_id=$(echo "$inbox_children" | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' | head -1)
+    [ -n "$folder_id" ] && { echo "$folder_id"; return 0; }
+
+    local level2_ids=$(echo "$inbox_children" | jq -r '.value[].id')
+    for parent_id in $level2_ids; do
+        folder_id=$(api_call GET "/me/mailFolders/$parent_id/childFolders?\$top=100" 2>/dev/null | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' 2>/dev/null | head -1)
+        [ -n "$folder_id" ] && { echo "$folder_id"; return 0; }
+    done
+
+    return 1
+}
+
 # Format message for display
 format_message() {
     jq -r '
@@ -1215,6 +1246,72 @@ ${existing_body}"
         echo "Moved message to '$folder_name'"
         ;;
 
+    batch-move|bulk-move)
+        folder_name="$2"
+        if [ -z "$folder_name" ]; then
+            echo "Usage: outlook-mail.sh batch-move <folder-name> <id1> [id2 ...]"
+            echo "       Message IDs may be given as arguments OR piped via stdin"
+            echo "       (newline- or space-separated). The destination folder is"
+            echo "       resolved once; moves run in batches of 20 via the Graph"
+            echo "       \$batch endpoint."
+            exit 1
+        fi
+        shift 2
+
+        # Gather message IDs: from remaining args, else from stdin if piped
+        ids=("$@")
+        if [ ${#ids[@]} -eq 0 ] && [ ! -t 0 ]; then
+            while read -r line; do
+                for tok in $line; do
+                    [ -n "$tok" ] && ids+=("$tok")
+                done
+            done
+        fi
+        if [ ${#ids[@]} -eq 0 ]; then
+            echo "Error: no message IDs provided (as arguments or via stdin)"
+            exit 1
+        fi
+
+        echo "Finding folder '$folder_name'..."
+        dest_folder_id=$(resolve_folder_id "$folder_name") || true
+        if [ -z "$dest_folder_id" ]; then
+            echo "Error: Folder '$folder_name' not found"
+            exit 1
+        fi
+
+        total=${#ids[@]}
+        echo "Moving $total message(s) to '$folder_name' (batches of 20)..."
+        moved=0
+        failed=0
+        i=0
+        while [ $i -lt "$total" ]; do
+            # Build a batch of up to 20 move sub-requests
+            requests="[]"
+            n=0
+            while [ $n -lt 20 ] && [ $i -lt "$total" ]; do
+                requests=$(echo "$requests" | jq \
+                    --arg rid "$n" --arg mid "${ids[$i]}" --arg dest "$dest_folder_id" \
+                    '. += [{id: $rid, method: "POST", url: ("/me/messages/" + $mid + "/move"), headers: {"Content-Type": "application/json"}, body: {destinationId: $dest}}]')
+                n=$((n + 1))
+                i=$((i + 1))
+            done
+            body=$(jq -n --argjson reqs "$requests" '{requests: $reqs}')
+            resp=$(api_call POST "/\$batch" "$body")
+
+            ok=$(echo "$resp" | jq '[.responses[]? | select(.status >= 200 and .status < 300)] | length' 2>/dev/null || echo 0)
+            bad=$(echo "$resp" | jq '[.responses[]? | select(.status >= 300)] | length' 2>/dev/null || echo 0)
+            moved=$((moved + ${ok:-0}))
+            failed=$((failed + ${bad:-0}))
+
+            # Surface any per-message failures
+            echo "$resp" | jq -r '.responses[]? | select(.status >= 300) | "  FAILED [\(.status)] \(.body.error.message // "unknown error")"' 2>/dev/null || true
+            echo "  progress: $moved/$total moved"
+        done
+
+        echo "Done: $moved moved, $failed failed."
+        [ "$failed" -eq 0 ] || exit 1
+        ;;
+
     mkdir)
         folder_name="$2"
         parent_folder="$3"
@@ -1267,6 +1364,68 @@ ${existing_body}"
         new_folder_id=$(echo "$result" | jq -r '.id')
         echo "Created folder '$folder_name'"
         echo "Folder ID: ${new_folder_id: -20}"
+        ;;
+
+    rename)
+        old_name="$2"
+        new_name="$3"
+        if [ -z "$old_name" ] || [ -z "$new_name" ]; then
+            echo "Usage: outlook-mail.sh rename <folder-name> <new-name>"
+            exit 1
+        fi
+        case "$(echo "$old_name" | tr '[:upper:]' '[:lower:]')" in
+            inbox|drafts|sentitems|sent\ items|deleteditems|deleted\ items|archive|junkemail|junk\ email|outbox)
+                echo "Refusing to rename well-known system folder '$old_name'"
+                exit 1
+                ;;
+        esac
+        fid=$(resolve_folder_id "$old_name") || true
+        if [ -z "$fid" ]; then
+            echo "Error: Folder '$old_name' not found"
+            exit 1
+        fi
+        result=$(api_call PATCH "/me/mailFolders/$fid" "$(jq -n --arg n "$new_name" '{displayName: $n}')")
+        if echo "$result" | jq -e '.error' > /dev/null 2>&1; then
+            echo "Error renaming folder:"
+            echo "$result" | jq -r '.error.message'
+            exit 1
+        fi
+        echo "Renamed '$old_name' -> '$new_name'"
+        ;;
+
+    rmdir)
+        target="$2"
+        force="$3"
+        if [ -z "$target" ]; then
+            echo "Usage: outlook-mail.sh rmdir <folder-name> [--force]"
+            echo "       Refuses to delete a non-empty folder unless --force is given"
+            echo "       (deleted folder contents are moved to Deleted Items)."
+            exit 1
+        fi
+        case "$(echo "$target" | tr '[:upper:]' '[:lower:]')" in
+            inbox|drafts|sentitems|sent\ items|deleteditems|deleted\ items|archive|junkemail|junk\ email|outbox)
+                echo "Refusing to delete well-known system folder '$target'"
+                exit 1
+                ;;
+        esac
+        fid=$(resolve_folder_id "$target") || true
+        if [ -z "$fid" ]; then
+            echo "Error: Folder '$target' not found"
+            exit 1
+        fi
+        count=$(api_call GET "/me/mailFolders/$fid?\$select=totalItemCount" | jq -r '.totalItemCount // 0')
+        if [ "${count:-0}" -gt 0 ] && [ "$force" != "--force" ]; then
+            echo "Refusing to delete '$target': it contains $count message(s)."
+            echo "Re-run with --force to delete anyway (contents move to Deleted Items)."
+            exit 1
+        fi
+        result=$(api_call DELETE "/me/mailFolders/$fid")
+        if [ -n "$result" ] && echo "$result" | jq -e '.error' > /dev/null 2>&1; then
+            echo "Error deleting folder:"
+            echo "$result" | jq -r '.error.message'
+            exit 1
+        fi
+        echo "Deleted folder '$target'"
         ;;
 
     attachments)
@@ -1567,7 +1726,10 @@ ${existing_body}"
         echo "  delete <id>                Delete message"
         echo "  archive <id>               Archive message"
         echo "  move <id> <folder>         Move message to folder"
+        echo "  batch-move <folder> <ids>  Move many messages (args or stdin) via \$batch"
         echo "  mkdir <name> [parent]      Create folder (subfolder if parent given)"
+        echo "  rename <folder> <new>      Rename a folder"
+        echo "  rmdir <folder> [--force]   Delete a folder (--force if non-empty)"
         echo "  folders                    List top-level mail folders"
         echo "  subfolders [parent]        List subfolders (default: inbox)"
         echo "  stats                      Inbox statistics"
