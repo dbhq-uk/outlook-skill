@@ -1,11 +1,11 @@
 #!/bin/bash
 # Install the Outlook skill into ~/.claude/skills/ as a live symlink install.
 #
-# The committed skill is plugin-native: SKILL.md references scripts via
-# ${CLAUDE_PLUGIN_ROOT}, which Claude Code substitutes for marketplace/plugin
-# installs. For a local symlink install (edit-and-see-live), this script rewrites
-# that variable to the installed path and symlinks the scripts so your edits are
-# immediately live. Re-run this script after editing a SKILL.md.
+# SKILL.md references scripts via ${CLAUDE_SKILL_DIR}, which Claude Code
+# substitutes to the skill's own directory for personal, project, and plugin
+# installs alike. So this script symlinks the whole skill directory into
+# ~/.claude/skills/ - every edit (scripts AND SKILL.md) is immediately live,
+# with no per-file rewrite. Re-run only when you add a new skill directory.
 
 set -e
 
@@ -30,25 +30,20 @@ command -v pandoc >/dev/null 2>&1 || echo "Optional: pandoc not found (needed fo
 echo "Dependencies OK."
 echo
 
-# --- Install each skill in this repo ---
+# --- Install each skill in this repo as a full-directory symlink ---
+mkdir -p "$SKILLS_ROOT"
 for src in "$SCRIPT_DIR"/skills/*/; do
   src="${src%/}"
   name="$(basename "$src")"
   target="$SKILLS_ROOT/$name"
   echo "Installing '$name' -> $target"
-  mkdir -p "$target"
-  # Live symlinks for the parts you edit often
-  [ -d "$src/scripts" ]    && ln -sfn "$src/scripts"    "$target/scripts"
-  [ -d "$src/references" ] && ln -sfn "$src/references" "$target/references"
+  rm -rf "$target"            # replace any prior copy or partial-symlink install
+  ln -sfn "$src" "$target"    # whole-directory symlink; ${CLAUDE_SKILL_DIR} resolves it
   chmod +x "$src"/scripts/*.sh 2>/dev/null || true
-  # Generate SKILL.md with the plugin-root variable rewritten to the install path.
-  # Generic (any skill), so cross-skill references within a pack also resolve.
-  sed 's#\${CLAUDE_PLUGIN_ROOT}/skills/#$HOME/.claude/skills/#g' \
-    "$src/SKILL.md" > "$target/SKILL.md"
 done
 
 echo
-echo "Installed. Scripts are symlinked (edits are live); re-run this script after editing a SKILL.md."
+echo "Installed as directory symlinks - all edits (scripts and SKILL.md) are live. Re-run only when adding a new skill."
 echo
 
 # --- Setup / credentials ---

@@ -304,13 +304,36 @@ case "$1" in
         fi
 
         echo "Reading message..."
-        api_call GET "/me/messages/$msg_id" | jq -r '
-            "Subject: \(.subject // "(no subject)")",
-            "From: \(.from.emailAddress.name // "") <\(.from.emailAddress.address // "")>",
-            "To: \([.toRecipients[].emailAddress | "\(.name // "") <\(.address)>"] | join(", "))",
-            "Date: \(.receivedDateTime)",
-            "---",
-            (.body.content | gsub("<[^>]*>"; "") | gsub("&nbsp;"; " ") | gsub("\\s+"; " ") | ltrimstr(" ") | rtrimstr(" "))'
+        # Expand attachments (metadata only) in the same call so image-only /
+        # attachment-only messages are never rendered as a blank body. Inline
+        # images (cid: refs) come back as attachments with isInline=true.
+        api_call GET "/me/messages/$msg_id?\$expand=attachments(\$select=id,name,size,contentType,isInline)" | jq -r '
+            def format_size:
+                if . == null then "?"
+                elif . < 1024 then "\(.)B"
+                elif . < 1048576 then "\((. / 1024 * 10 | floor) / 10)KB"
+                else "\((. / 1048576 * 10 | floor) / 10)MB"
+                end;
+            ( (.body.content // "")
+                | gsub("<[^>]*>"; "") | gsub("&nbsp;"; " ") | gsub("\\s+"; " ")
+                | ltrimstr(" ") | rtrimstr(" ") ) as $text
+            | ( .subject // "" ) as $subj
+            | ( .attachments // [] ) as $atts
+            | "Subject: \(if ($subj | length) > 0 then $subj else "(no subject)" end)",
+              "From: \(.from.emailAddress.name // "") <\(.from.emailAddress.address // "")>",
+              "To: \([.toRecipients[]?.emailAddress | "\(.name // "") <\(.address)>"] | join(", "))",
+              ( if (.ccRecipients // [] | length) > 0 then "Cc: \([.ccRecipients[]?.emailAddress | "\(.name // "") <\(.address)>"] | join(", "))" else empty end),
+              "Date: \(.receivedDateTime)",
+              "---",
+              ( if ($text | length) > 0 then $text
+                elif ($atts | length) > 0 then "(no text body - this message is \($atts | length) attachment(s)/inline image(s); listed below)"
+                else "(no text body)" end ),
+              ( if ($atts | length) > 0 then
+                  "",
+                  "--- Attachments (\($atts | length)) ---",
+                  ( $atts[] | "- \(.name // "(unnamed)") | \(.contentType) | \(.size | format_size)\(if .isInline then " | inline" else "" end)" ),
+                  "Download with: outlook-mail.sh download <message-id>   (saves to ./inbox/)"
+                else empty end )'
         ;;
 
     preview)

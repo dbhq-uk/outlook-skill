@@ -1,9 +1,9 @@
 #!/bin/bash
 # Install the Outlook skill into ~/.codex/skills/ for Codex.
 #
-# Codex does not substitute ${CLAUDE_PLUGIN_ROOT}, so this script rewrites that
-# variable to the installed Codex path and symlinks the scripts (edits stay live).
-# Re-run after editing a SKILL.md.
+# Codex does not substitute ${CLAUDE_SKILL_DIR}, so this script rewrites that
+# variable to each skill's installed Codex path and symlinks the scripts (edits
+# stay live). Re-run after editing a SKILL.md.
 
 set -e
 
@@ -34,7 +34,9 @@ for src in "$SCRIPT_DIR"/skills/*/; do
   [ -d "$src/scripts" ]    && ln -sfn "$src/scripts"    "$target/scripts"
   [ -d "$src/references" ] && ln -sfn "$src/references" "$target/references"
   chmod +x "$src"/scripts/*.sh 2>/dev/null || true
-  sed 's#\${CLAUDE_PLUGIN_ROOT}/skills/#$HOME/.codex/skills/#g' \
+  # Rewrite ${CLAUDE_SKILL_DIR} to this skill's Codex path. Cross-skill refs of
+  # the form ${CLAUDE_SKILL_DIR}/../<other> then resolve to a sibling skill.
+  sed "s#\${CLAUDE_SKILL_DIR}#$target#g" \
     "$src/SKILL.md" > "$target/SKILL.md"
 done
 
