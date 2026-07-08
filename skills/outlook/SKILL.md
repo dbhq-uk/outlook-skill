@@ -256,6 +256,14 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Projects"
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Acme" "Clients"
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Urgent" inbox
 
+# Rename a folder (refuses well-known system folders)
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rename "Old Name" "New Name"
+
+# Delete a folder (refuses non-empty folders unless --force; refuses system
+# folders always). With --force, contents move to Deleted Items.
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rmdir "Empty Folder"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rmdir "Old Folder" --force
+
 # Inbox statistics (total, unread counts)
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh stats
 ```
