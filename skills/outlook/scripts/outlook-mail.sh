@@ -1366,6 +1366,68 @@ ${existing_body}"
         echo "Folder ID: ${new_folder_id: -20}"
         ;;
 
+    rename)
+        old_name="$2"
+        new_name="$3"
+        if [ -z "$old_name" ] || [ -z "$new_name" ]; then
+            echo "Usage: outlook-mail.sh rename <folder-name> <new-name>"
+            exit 1
+        fi
+        case "$(echo "$old_name" | tr '[:upper:]' '[:lower:]')" in
+            inbox|drafts|sentitems|sent\ items|deleteditems|deleted\ items|archive|junkemail|junk\ email|outbox)
+                echo "Refusing to rename well-known system folder '$old_name'"
+                exit 1
+                ;;
+        esac
+        fid=$(resolve_folder_id "$old_name") || true
+        if [ -z "$fid" ]; then
+            echo "Error: Folder '$old_name' not found"
+            exit 1
+        fi
+        result=$(api_call PATCH "/me/mailFolders/$fid" "$(jq -n --arg n "$new_name" '{displayName: $n}')")
+        if echo "$result" | jq -e '.error' > /dev/null 2>&1; then
+            echo "Error renaming folder:"
+            echo "$result" | jq -r '.error.message'
+            exit 1
+        fi
+        echo "Renamed '$old_name' -> '$new_name'"
+        ;;
+
+    rmdir)
+        target="$2"
+        force="$3"
+        if [ -z "$target" ]; then
+            echo "Usage: outlook-mail.sh rmdir <folder-name> [--force]"
+            echo "       Refuses to delete a non-empty folder unless --force is given"
+            echo "       (deleted folder contents are moved to Deleted Items)."
+            exit 1
+        fi
+        case "$(echo "$target" | tr '[:upper:]' '[:lower:]')" in
+            inbox|drafts|sentitems|sent\ items|deleteditems|deleted\ items|archive|junkemail|junk\ email|outbox)
+                echo "Refusing to delete well-known system folder '$target'"
+                exit 1
+                ;;
+        esac
+        fid=$(resolve_folder_id "$target") || true
+        if [ -z "$fid" ]; then
+            echo "Error: Folder '$target' not found"
+            exit 1
+        fi
+        count=$(api_call GET "/me/mailFolders/$fid?\$select=totalItemCount" | jq -r '.totalItemCount // 0')
+        if [ "${count:-0}" -gt 0 ] && [ "$force" != "--force" ]; then
+            echo "Refusing to delete '$target': it contains $count message(s)."
+            echo "Re-run with --force to delete anyway (contents move to Deleted Items)."
+            exit 1
+        fi
+        result=$(api_call DELETE "/me/mailFolders/$fid")
+        if [ -n "$result" ] && echo "$result" | jq -e '.error' > /dev/null 2>&1; then
+            echo "Error deleting folder:"
+            echo "$result" | jq -r '.error.message'
+            exit 1
+        fi
+        echo "Deleted folder '$target'"
+        ;;
+
     attachments)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
@@ -1666,6 +1728,8 @@ ${existing_body}"
         echo "  move <id> <folder>         Move message to folder"
         echo "  batch-move <folder> <ids>  Move many messages (args or stdin) via \$batch"
         echo "  mkdir <name> [parent]      Create folder (subfolder if parent given)"
+        echo "  rename <folder> <new>      Rename a folder"
+        echo "  rmdir <folder> [--force]   Delete a folder (--force if non-empty)"
         echo "  folders                    List top-level mail folders"
         echo "  subfolders [parent]        List subfolders (default: inbox)"
         echo "  stats                      Inbox statistics"
