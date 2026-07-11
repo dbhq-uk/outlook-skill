@@ -254,6 +254,7 @@ echo
 # Exchange code for tokens
 echo "Exchanging code for tokens..."
 
+NOW=$(date +%s)
 TOKEN_RESPONSE=$(curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "client_id=$CLIENT_ID" \
@@ -270,8 +271,10 @@ if echo "$TOKEN_RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
     exit 1
 fi
 
-# Save credentials
-echo "$TOKEN_RESPONSE" > "$CREDS_FILE"
+# Save credentials, stamping an absolute expiry so the mail/calendar scripts can
+# skip their per-command token pre-flight.
+EXPIRES_IN=$(echo "$TOKEN_RESPONSE" | jq -r '.expires_in // 3600')
+echo "$TOKEN_RESPONSE" | jq --argjson at "$((NOW + EXPIRES_IN))" '. + {expires_at: $at}' > "$CREDS_FILE"
 chmod 600 "$CREDS_FILE"
 
 echo -e "${GREEN}Tokens saved to $CREDS_FILE${NC}"

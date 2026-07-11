@@ -119,11 +119,18 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh sent 25
 # List messages from any folder by name (searches recursively)
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh folder "Projects" 20
 
-# Filter by sender
+# Filter by sender (newest first)
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh from "john@example.com"
 
-# Search emails
+# Search emails. Free text searches across fields; add a count (default 10, max
+# 1000, or "all"). Results come back ranked by Graph, then sorted newest-first.
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search "project update"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search "invoice" 50
+
+# Search with KQL for precision: field operators (subject:, from:, to:, body:)
+# and booleans (AND/OR/NOT). The query is passed through to Graph's $search.
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search 'subject:invoice AND from:jane@example.com'
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search 'from:acme.com AND body:renewal' all
 
 # Read full message (use ID from list)
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh read <message-id>
@@ -222,7 +229,10 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh delete <message-id>
 # Archive
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh archive <message-id>
 
-# Move to any folder (searches by name, supports nested folders)
+# Move to any folder. Names resolve identically across move/batch-move/folder/
+# rename/rmdir/mkdir: a bare name is matched case-insensitively anywhere in the
+# folder tree (shallowest wins on a tie); use a "Parent/Child" path to target a
+# specific nested folder when the same name exists in more than one place.
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh move <message-id> "Projects"
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh move <message-id> "Clients/Acme"
 

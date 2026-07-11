@@ -42,60 +42,71 @@ if [ ! -f "$CREDS_FILE" ]; then
     exit 1
 fi
 
-# Auto-refresh token if needed
-ensure_valid_token() {
-    local access_token
-    access_token=$(jq -r '.access_token' "$CREDS_FILE")
+# --- Token management -------------------------------------------------------
+# The access token is resolved from a locally-stored absolute expiry
+# (expires_at), so the common path makes NO network pre-flight call. The token
+# is refreshed over the network only when it is missing/expired, or when Graph
+# rejects it mid-run (handled reactively in api_call).
 
-    # Quick test call
-    local test_response
-    test_response=$(curl -s -X GET "https://graph.microsoft.com/v1.0/me" \
-        -H "Authorization: Bearer $access_token")
+# Refresh the access token, stamp an absolute expiry into credentials.json, and
+# print the new access token. Errors go to stderr so captured stdout stays a
+# clean token (empty on failure -> the guard below catches it).
+refresh_access_token() {
+    local refresh_token client_id client_secret now response expires_in
+    refresh_token=$(jq -r '.refresh_token // empty' "$CREDS_FILE")
+    client_id=$(jq -r '.client_id // empty' "$CONFIG_FILE")
+    client_secret=$(jq -r '.client_secret // empty' "$CONFIG_FILE")
 
-    if echo "$test_response" | jq -e '.error' > /dev/null 2>&1; then
-        # Token invalid, try refresh
-        local refresh_token client_id client_secret
-        refresh_token=$(jq -r '.refresh_token' "$CREDS_FILE")
-        client_id=$(jq -r '.client_id' "$CONFIG_FILE")
-        client_secret=$(jq -r '.client_secret' "$CONFIG_FILE")
-
-        if [ -z "$refresh_token" ] || [ "$refresh_token" = "null" ]; then
-            echo "Error: No refresh token. Run outlook-setup.sh to re-authenticate."
-            exit 1
-        fi
-
-        local scope="offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read"
-        local refresh_response
-        refresh_response=$(curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            -d "client_id=$client_id" \
-            -d "client_secret=$client_secret" \
-            -d "refresh_token=$refresh_token" \
-            -d "grant_type=refresh_token" \
-            -d "scope=$scope")
-
-        if echo "$refresh_response" | jq -e '.error' > /dev/null 2>&1; then
-            echo "Error refreshing token: $(echo "$refresh_response" | jq -r '.error_description')"
-            exit 1
-        fi
-
-        echo "$refresh_response" > "$CREDS_FILE"
-        chmod 600 "$CREDS_FILE"
-        access_token=$(jq -r '.access_token' "$CREDS_FILE")
+    if [ -z "$refresh_token" ]; then
+        echo "Error: No refresh token. Run outlook-setup.sh to re-authenticate." >&2
+        return 1
     fi
 
-    echo "$access_token"
+    now=$(date +%s)
+    response=$(curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "client_id=$client_id" \
+        -d "client_secret=$client_secret" \
+        -d "refresh_token=$refresh_token" \
+        -d "grant_type=refresh_token" \
+        -d "scope=offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read")
+
+    if echo "$response" | jq -e '.error' > /dev/null 2>&1; then
+        echo "Error refreshing token: $(echo "$response" | jq -r '.error_description // .error')" >&2
+        return 1
+    fi
+
+    expires_in=$(echo "$response" | jq -r '.expires_in // 3600')
+    echo "$response" | jq --argjson at "$((now + expires_in))" '. + {expires_at: $at}' > "$CREDS_FILE"
+    chmod 600 "$CREDS_FILE"
+    jq -r '.access_token' "$CREDS_FILE"
 }
 
-ACCESS_TOKEN=$(ensure_valid_token)
+# Print a valid access token, refreshing over the network only when needed.
+ensure_valid_token() {
+    local access_token expires_at now
+    access_token=$(jq -r '.access_token // empty' "$CREDS_FILE")
+    expires_at=$(jq -r '.expires_at // 0' "$CREDS_FILE")
+    now=$(date +%s)
+
+    # 60s safety margin. A missing/zero expires_at always falls through to refresh
+    # (e.g. first run after upgrade, before an expiry has been stamped).
+    if [ -n "$access_token" ] && [ "$now" -lt "$((expires_at - 60))" ]; then
+        echo "$access_token"
+        return 0
+    fi
+    refresh_access_token
+}
+
+ACCESS_TOKEN=$(ensure_valid_token) || true
 
 if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
-    echo "Error: Invalid access token."
+    echo "Error: Invalid access token. Run outlook-setup.sh to re-authenticate."
     exit 1
 fi
 
-# API call helper
-api_call() {
+# Low-level Graph request using the current $ACCESS_TOKEN.
+_graph_request() {
     local method="$1"
     local endpoint="$2"
     local data="$3"
@@ -111,6 +122,28 @@ api_call() {
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Prefer: outlook.timezone=\"$DEFAULT_TIMEZONE\""
     fi
+}
+
+# API call helper. Transparently refreshes the token and retries once if Graph
+# rejects it mid-run (revoked, clock skew, or a race with local expiry). A
+# transport failure (curl non-zero) is turned into a JSON error so callers can
+# surface it — but a legitimately empty body (HTTP 204/202 from DELETE/send) is
+# left empty, since callers treat "no .error" as success.
+api_call() {
+    local response rc
+    response=$(_graph_request "$@") && rc=0 || rc=$?
+
+    if [ -z "${OUTLOOK_TOKEN_RETRIED:-}" ] && \
+       printf '%s' "$response" | jq -e 'objects | .error.code == "InvalidAuthenticationToken"' >/dev/null 2>&1; then
+        OUTLOOK_TOKEN_RETRIED=1
+        ACCESS_TOKEN=$(refresh_access_token) || true
+        response=$(_graph_request "$@") && rc=0 || rc=$?
+    fi
+
+    if [ "$rc" -ne 0 ] && [ -z "$response" ]; then
+        response='{"error":{"code":"NetworkError","message":"Request to Microsoft Graph failed (network error, timeout, or connectivity issue)."}}'
+    fi
+    printf '%s' "$response"
 }
 
 # Format event for display

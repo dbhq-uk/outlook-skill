@@ -63,6 +63,7 @@ case "$1" in
 
         echo "Refreshing token..."
 
+        NOW=$(date +%s)
         RESPONSE=$(curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
             -H "Content-Type: application/x-www-form-urlencoded" \
             -d "client_id=$CLIENT_ID" \
@@ -78,8 +79,10 @@ case "$1" in
             exit 1
         fi
 
-        # Save new credentials
-        echo "$RESPONSE" > "$CREDS_FILE"
+        # Save new credentials, stamping an absolute expiry so the mail/calendar
+        # scripts can skip their per-command token pre-flight.
+        EXPIRES_IN=$(echo "$RESPONSE" | jq -r '.expires_in // 3600')
+        echo "$RESPONSE" | jq --argjson at "$((NOW + EXPIRES_IN))" '. + {expires_at: $at}' > "$CREDS_FILE"
         chmod 600 "$CREDS_FILE"
 
         echo "Token refreshed successfully"
