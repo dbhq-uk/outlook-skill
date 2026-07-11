@@ -31,60 +31,71 @@ if [ ! -f "$CREDS_FILE" ]; then
     exit 1
 fi
 
-# Auto-refresh token if needed
-ensure_valid_token() {
-    local access_token
-    access_token=$(jq -r '.access_token' "$CREDS_FILE")
+# --- Token management -------------------------------------------------------
+# The access token is resolved from a locally-stored absolute expiry
+# (expires_at), so the common path makes NO network pre-flight call. The token
+# is refreshed over the network only when it is missing/expired, or when Graph
+# rejects it mid-run (handled reactively in api_call).
 
-    # Quick test call
-    local test_response
-    test_response=$(curl -s -X GET "https://graph.microsoft.com/v1.0/me" \
-        -H "Authorization: Bearer $access_token")
+# Refresh the access token, stamp an absolute expiry into credentials.json, and
+# print the new access token. Errors go to stderr so captured stdout stays a
+# clean token (empty on failure -> the guard below catches it).
+refresh_access_token() {
+    local refresh_token client_id client_secret now response expires_in
+    refresh_token=$(jq -r '.refresh_token // empty' "$CREDS_FILE")
+    client_id=$(jq -r '.client_id // empty' "$CONFIG_FILE")
+    client_secret=$(jq -r '.client_secret // empty' "$CONFIG_FILE")
 
-    if echo "$test_response" | jq -e '.error' > /dev/null 2>&1; then
-        # Token invalid, try refresh
-        local refresh_token client_id client_secret
-        refresh_token=$(jq -r '.refresh_token' "$CREDS_FILE")
-        client_id=$(jq -r '.client_id' "$CONFIG_FILE")
-        client_secret=$(jq -r '.client_secret' "$CONFIG_FILE")
-
-        if [ -z "$refresh_token" ] || [ "$refresh_token" = "null" ]; then
-            echo "Error: No refresh token. Run outlook-setup.sh to re-authenticate."
-            exit 1
-        fi
-
-        local scope="offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read"
-        local refresh_response
-        refresh_response=$(curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            -d "client_id=$client_id" \
-            -d "client_secret=$client_secret" \
-            -d "refresh_token=$refresh_token" \
-            -d "grant_type=refresh_token" \
-            -d "scope=$scope")
-
-        if echo "$refresh_response" | jq -e '.error' > /dev/null 2>&1; then
-            echo "Error refreshing token: $(echo "$refresh_response" | jq -r '.error_description')"
-            exit 1
-        fi
-
-        echo "$refresh_response" > "$CREDS_FILE"
-        chmod 600 "$CREDS_FILE"
-        access_token=$(jq -r '.access_token' "$CREDS_FILE")
+    if [ -z "$refresh_token" ]; then
+        echo "Error: No refresh token. Run outlook-setup.sh to re-authenticate." >&2
+        return 1
     fi
 
-    echo "$access_token"
+    now=$(date +%s)
+    response=$(curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "client_id=$client_id" \
+        -d "client_secret=$client_secret" \
+        -d "refresh_token=$refresh_token" \
+        -d "grant_type=refresh_token" \
+        -d "scope=offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read")
+
+    if echo "$response" | jq -e '.error' > /dev/null 2>&1; then
+        echo "Error refreshing token: $(echo "$response" | jq -r '.error_description // .error')" >&2
+        return 1
+    fi
+
+    expires_in=$(echo "$response" | jq -r '.expires_in // 3600')
+    echo "$response" | jq --argjson at "$((now + expires_in))" '. + {expires_at: $at}' > "$CREDS_FILE"
+    chmod 600 "$CREDS_FILE"
+    jq -r '.access_token' "$CREDS_FILE"
 }
 
-ACCESS_TOKEN=$(ensure_valid_token)
+# Print a valid access token, refreshing over the network only when needed.
+ensure_valid_token() {
+    local access_token expires_at now
+    access_token=$(jq -r '.access_token // empty' "$CREDS_FILE")
+    expires_at=$(jq -r '.expires_at // 0' "$CREDS_FILE")
+    now=$(date +%s)
+
+    # 60s safety margin. A missing/zero expires_at always falls through to refresh
+    # (e.g. first run after upgrade, before an expiry has been stamped).
+    if [ -n "$access_token" ] && [ "$now" -lt "$((expires_at - 60))" ]; then
+        echo "$access_token"
+        return 0
+    fi
+    refresh_access_token
+}
+
+ACCESS_TOKEN=$(ensure_valid_token) || true
 
 if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
-    echo "Error: Invalid access token."
+    echo "Error: Invalid access token. Run outlook-setup.sh to re-authenticate."
     exit 1
 fi
 
-# API call helper
-api_call() {
+# Low-level Graph request using the current $ACCESS_TOKEN.
+_graph_request() {
     local method="$1"
     local endpoint="$2"
     local data="$3"
@@ -102,6 +113,28 @@ api_call() {
     fi
 }
 
+# API call helper. Transparently refreshes the token and retries once if Graph
+# rejects it mid-run (revoked, clock skew, or a race with local expiry). A
+# transport failure (curl non-zero) is turned into a JSON error so callers can
+# surface it — but a legitimately empty body (HTTP 204/202 from DELETE/send) is
+# left empty, since callers treat "no .error" as success.
+api_call() {
+    local response rc
+    response=$(_graph_request "$@") && rc=0 || rc=$?
+
+    if [ -z "${OUTLOOK_TOKEN_RETRIED:-}" ] && \
+       printf '%s' "$response" | jq -e 'objects | .error.code == "InvalidAuthenticationToken"' >/dev/null 2>&1; then
+        OUTLOOK_TOKEN_RETRIED=1
+        ACCESS_TOKEN=$(refresh_access_token) || true
+        response=$(_graph_request "$@") && rc=0 || rc=$?
+    fi
+
+    if [ "$rc" -ne 0 ] && [ -z "$response" ]; then
+        response='{"error":{"code":"NetworkError","message":"Request to Microsoft Graph failed (network error, timeout, or connectivity issue)."}}'
+    fi
+    printf '%s' "$response"
+}
+
 # Cache message IDs from an API response for fast short-ID resolution.
 # Called after every listing command so that resolve_message_id can find
 # messages from any folder (inbox, subfolders, drafts, sent) without
@@ -111,35 +144,80 @@ cache_message_ids() {
     echo "$response" | jq -c '[.value[].id // empty]' > "$ID_CACHE_FILE" 2>/dev/null || true
 }
 
-# Resolve a folder name to its ID: well-known names, then top-level folders,
-# then nested under inbox (levels 2 and 3). Prints the ID and returns 0 on a
-# match, returns 1 on no match. Shared by batch-move; the single-message `move`
-# keeps its own inline copy so its behaviour is untouched.
-resolve_folder_id() {
-    local search_name="$1"
-    local folder_id=""
+# --- Folder resolution ------------------------------------------------------
+# One resolver, shared by folder/move/batch-move/rename/rmdir/mkdir so a folder
+# name resolves identically everywhere (the previous inline copies searched to
+# different depths, so a deeply-nested folder could be listable but not movable).
 
-    case "$search_name" in
+# Breadth-first search for a folder whose displayName matches $1 (case-insensitive),
+# starting at all top-level folders and descending through childFolders up to
+# $2 levels (default 4). Ties resolve to the SHALLOWEST match; use a
+# Parent/Child path to disambiguate. Prints the ID + returns 0, or returns 1.
+_find_folder_by_name() {
+    local target="$1" max_depth="${2:-4}"
+    local resp match level_ids depth next_ids pid children
+
+    resp=$(api_call GET "/me/mailFolders?\$top=200")
+    match=$(printf '%s' "$resp" | jq -r --arg n "$target" '.value[]? | select((.displayName|ascii_downcase)==($n|ascii_downcase)) | .id' | head -1)
+    [ -n "$match" ] && { printf '%s' "$match"; return 0; }
+    level_ids=$(printf '%s' "$resp" | jq -r '.value[]?.id')
+
+    depth=1
+    while [ "$depth" -le "$max_depth" ] && [ -n "$level_ids" ]; do
+        next_ids=""
+        for pid in $level_ids; do
+            children=$(api_call GET "/me/mailFolders/$pid/childFolders?\$top=200" 2>/dev/null)
+            match=$(printf '%s' "$children" | jq -r --arg n "$target" '.value[]? | select((.displayName|ascii_downcase)==($n|ascii_downcase)) | .id' 2>/dev/null | head -1)
+            [ -n "$match" ] && { printf '%s' "$match"; return 0; }
+            next_ids="$next_ids $(printf '%s' "$children" | jq -r '.value[]?.id' 2>/dev/null)"
+        done
+        level_ids="$next_ids"
+        depth=$((depth + 1))
+    done
+    return 1
+}
+
+# Walk a "Parent/Child/Grandchild" path, resolving each segment under the
+# previous. Prints the leaf ID + returns 0, or returns 1 if any segment misses.
+_resolve_folder_path() {
+    local path="$1" parent_id="" first=1 seg match oldIFS
+    oldIFS="$IFS"; IFS='/'; read -ra segs <<< "$path"; IFS="$oldIFS"
+    for seg in "${segs[@]}"; do
+        [ -z "$seg" ] && continue
+        if [ "$first" = 1 ]; then
+            match=$(resolve_folder_id "$seg") || match=""
+            first=0
+        else
+            match=$(api_call GET "/me/mailFolders/$parent_id/childFolders?\$top=200" | jq -r --arg n "$seg" '.value[]? | select((.displayName|ascii_downcase)==($n|ascii_downcase)) | .id' | head -1)
+        fi
+        [ -z "$match" ] && return 1
+        parent_id="$match"
+    done
+    [ -n "$parent_id" ] && { printf '%s' "$parent_id"; return 0; }
+    return 1
+}
+
+# Resolve a folder name (or "Parent/Child" path) to its ID. Order: path form,
+# then well-known aliases, then a case-insensitive BFS by name across the tree.
+# Prints the ID + returns 0 on a match; returns 1 on no match.
+resolve_folder_id() {
+    local name="$1"
+
+    if [[ "$name" == */* ]]; then
+        _resolve_folder_path "$name"
+        return $?
+    fi
+
+    local lc wid
+    lc=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
+    case "$lc" in
         inbox|drafts|sentitems|deleteditems|archive|junkemail)
-            folder_id=$(api_call GET "/me/mailFolders/$search_name" | jq -r '.id // empty')
-            [ -n "$folder_id" ] && { echo "$folder_id"; return 0; }
+            wid=$(api_call GET "/me/mailFolders/$lc" | jq -r '.id // empty')
+            [ -n "$wid" ] && { printf '%s' "$wid"; return 0; }
             ;;
     esac
 
-    folder_id=$(api_call GET "/me/mailFolders?\$top=100" | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' | head -1)
-    [ -n "$folder_id" ] && { echo "$folder_id"; return 0; }
-
-    local inbox_children=$(api_call GET "/me/mailFolders/inbox/childFolders?\$top=100")
-    folder_id=$(echo "$inbox_children" | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' | head -1)
-    [ -n "$folder_id" ] && { echo "$folder_id"; return 0; }
-
-    local level2_ids=$(echo "$inbox_children" | jq -r '.value[].id')
-    for parent_id in $level2_ids; do
-        folder_id=$(api_call GET "/me/mailFolders/$parent_id/childFolders?\$top=100" 2>/dev/null | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' 2>/dev/null | head -1)
-        [ -n "$folder_id" ] && { echo "$folder_id"; return 0; }
-    done
-
-    return 1
+    _find_folder_by_name "$name"
 }
 
 # Format message for display
@@ -250,6 +328,52 @@ recipients_to_json() {
             | map({emailAddress: {address: .}}))'
 }
 
+# URL-encode a string for safe use as a query-string value (spaces, &, #, :, +,
+# quotes, non-ASCII). Without this, a query like "Q3 & Q4" is silently truncated.
+urlencode() { jq -rn --arg s "$1" '$s|@uri'; }
+
+# Run a Graph message $search and print the result object newest-first.
+# The whole query is wrapped in the double quotes Graph requires around a
+# $search value — this is the documented form for plain text AND for KQL field
+# operators alike ($search="subject:pizza", $search="from:john AND subject:x").
+# $search cannot be combined with $orderby server-side, so results (which come
+# back ranked/date-mixed across folders) are sorted client-side by
+# receivedDateTime desc. Follows @odata.nextLink to collect up to <count>
+# messages (hard cap 1000). Usage: run_message_search "<text-or-KQL>" [count|all]
+run_message_search() {
+    local query="$1" max="${2:-10}"
+    case "$max" in all|ALL) max=1000 ;; esac
+    [[ "$max" =~ ^[0-9]+$ ]] || max=10
+    [ "$max" -gt 1000 ] && max=1000
+    [ "$max" -lt 1 ] && max=1
+
+    # Strip any quotes the caller already wrapped the value in, then re-wrap so we
+    # never emit $search=""x"" (which Graph rejects).
+    query="${query%\"}"; query="${query#\"}"
+
+    local encoded page_size url merged page collected next
+    encoded=$(urlencode "\"$query\"")
+
+    page_size=100
+    [ "$max" -lt "$page_size" ] && page_size="$max"
+    url="/me/messages?\$search=${encoded}&\$top=${page_size}&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview"
+    merged='[]'
+    while [ -n "$url" ]; do
+        page=$(api_call GET "$url")
+        if echo "$page" | jq -e '.error' >/dev/null 2>&1; then
+            echo "$page"              # propagate the error object unchanged
+            return 0
+        fi
+        merged=$(jq -n --argjson a "$merged" --argjson b "$(echo "$page" | jq '.value // []')" '$a + $b')
+        collected=$(echo "$merged" | jq 'length')
+        [ "$collected" -ge "$max" ] && break
+        next=$(echo "$page" | jq -r '."@odata.nextLink" // empty')
+        [ -z "$next" ] && break
+        url="${next#"$GRAPH_URL"}"    # nextLink is absolute; strip base for api_call
+    done
+    echo "$merged" | jq --argjson max "$max" '{value: (sort_by(.receivedDateTime) | reverse | .[0:$max])}'
+}
+
 # Commands
 case "$1" in
     inbox)
@@ -295,8 +419,8 @@ case "$1" in
             echo "Usage: outlook-mail.sh from <sender-email> [count]"
             exit 1
         fi
-        echo "Fetching emails from $sender..."
-        result=$(api_call GET "/me/messages?\$search=%22from:$sender%22&\$top=$count&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview")
+        echo "Fetching emails from $sender (newest first)..."
+        result=$(run_message_search "from:$sender" "$count")
         cache_message_ids "$result"
         echo "$result" | format_messages
         ;;
@@ -306,16 +430,21 @@ case "$1" in
         count="${3:-10}"
         if [ -z "$query" ]; then
             echo "Usage: outlook-mail.sh search <query> [count]"
+            echo "  <query>  free text OR KQL field operators. Examples:"
+            echo "             search \"invoice March\"                  free text"
+            echo "             search 'subject:invoice AND from:jane@x.com'"
+            echo "             search 'to:me@x.com AND body:contract' 50"
+            echo "  [count]  results to return: default 10, max 1000, or 'all'"
+            echo "  Results come back ranked by Graph, then sorted newest-first."
             exit 1
         fi
-        # If query looks like an email address, use KQL from: search for precise matching
+        # A bare email address -> precise from: match; otherwise free-text/KQL.
         if [[ "$query" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
-            echo "Searching for emails from $query..."
-            result=$(api_call GET "/me/messages?\$search=%22from:$query%22&\$top=$count&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview")
+            echo "Searching for emails from $query (newest first)..."
+            result=$(run_message_search "from:$query" "$count")
         else
-            echo "Searching for: $query..."
-            # Note: $search cannot be combined with $orderby in Microsoft Graph API
-            result=$(api_call GET "/me/messages?\$search=\"$query\"&\$top=$count&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview")
+            echo "Searching for: $query (newest first)..."
+            result=$(run_message_search "$query" "$count")
         fi
         cache_message_ids "$result"
         echo "$result" | format_messages
@@ -653,7 +782,7 @@ ${html_body}
                 existing_body=$(api_call GET "/me/messages/$draft_id?\$select=body" | jq -r '.body.content // ""')
                 if [[ "$existing_body" == *"$chain_marker"* ]]; then
                     # Everything from the first occurrence of the marker onwards
-                    chain_part="${chain_marker}${existing_body#*$chain_marker}"
+                    chain_part="${chain_marker}${existing_body#*"$chain_marker"}"
                     full_body="${html_body}<br/>${chain_part}"
                 else
                     full_body="${html_body}"
@@ -1086,63 +1215,7 @@ ${existing_body}"
 
         echo "Finding folder '$folder_name'..."
 
-        # Search function to find folder ID by name (recursive, up to 4 levels deep)
-        find_folder_id() {
-            local search_name="$1"
-            local folder_id=""
-
-            # Check top-level folders first
-            folder_id=$(api_call GET "/me/mailFolders?\$top=100" | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' | head -1)
-
-            if [ -n "$folder_id" ]; then
-                echo "$folder_id"
-                return 0
-            fi
-
-            # Search in inbox subfolders (level 2)
-            local inbox_children=$(api_call GET "/me/mailFolders/inbox/childFolders?\$top=100")
-            folder_id=$(echo "$inbox_children" | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' | head -1)
-
-            if [ -n "$folder_id" ]; then
-                echo "$folder_id"
-                return 0
-            fi
-
-            # Search level 3 - children of inbox subfolders
-            local level2_ids=$(echo "$inbox_children" | jq -r '.value[].id')
-            for parent_id in $level2_ids; do
-                local level3_children=$(api_call GET "/me/mailFolders/$parent_id/childFolders?\$top=100" 2>/dev/null)
-                folder_id=$(echo "$level3_children" | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' 2>/dev/null | head -1)
-                if [ -n "$folder_id" ]; then
-                    echo "$folder_id"
-                    return 0
-                fi
-
-                # Search level 4 - one more level deep
-                local level3_ids=$(echo "$level3_children" | jq -r '.value[].id' 2>/dev/null)
-                for level3_id in $level3_ids; do
-                    folder_id=$(api_call GET "/me/mailFolders/$level3_id/childFolders?\$top=100" 2>/dev/null | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' 2>/dev/null | head -1)
-                    if [ -n "$folder_id" ]; then
-                        echo "$folder_id"
-                        return 0
-                    fi
-                done
-            done
-
-            # Also search other top-level folders (not just inbox)
-            local top_folders=$(api_call GET "/me/mailFolders?\$top=50" | jq -r '.value[] | select(.displayName != "Inbox") | .id')
-            for parent_id in $top_folders; do
-                folder_id=$(api_call GET "/me/mailFolders/$parent_id/childFolders?\$top=100" 2>/dev/null | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' 2>/dev/null | head -1)
-                if [ -n "$folder_id" ]; then
-                    echo "$folder_id"
-                    return 0
-                fi
-            done
-
-            return 1
-        }
-
-        folder_id=$(find_folder_id "$folder_name")
+        folder_id=$(resolve_folder_id "$folder_name") || true
 
         if [ -z "$folder_id" ]; then
             echo "Error: Folder '$folder_name' not found"
@@ -1182,52 +1255,7 @@ ${existing_body}"
 
         echo "Finding folder '$folder_name'..."
 
-        # Find folder ID (reusing find_folder_id logic)
-        find_folder_id() {
-            local search_name="$1"
-            local folder_id=""
-
-            # Check well-known folder names first
-            case "$search_name" in
-                inbox|drafts|sentitems|deleteditems|archive|junkemail)
-                    folder_id=$(api_call GET "/me/mailFolders/$search_name" | jq -r '.id // empty')
-                    if [ -n "$folder_id" ]; then
-                        echo "$folder_id"
-                        return 0
-                    fi
-                    ;;
-            esac
-
-            # Check top-level folders
-            folder_id=$(api_call GET "/me/mailFolders?\$top=100" | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' | head -1)
-            if [ -n "$folder_id" ]; then
-                echo "$folder_id"
-                return 0
-            fi
-
-            # Search in inbox subfolders (level 2)
-            local inbox_children=$(api_call GET "/me/mailFolders/inbox/childFolders?\$top=100")
-            folder_id=$(echo "$inbox_children" | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' | head -1)
-            if [ -n "$folder_id" ]; then
-                echo "$folder_id"
-                return 0
-            fi
-
-            # Search level 3 - children of inbox subfolders
-            local level2_ids=$(echo "$inbox_children" | jq -r '.value[].id')
-            for parent_id in $level2_ids; do
-                local level3_children=$(api_call GET "/me/mailFolders/$parent_id/childFolders?\$top=100" 2>/dev/null)
-                folder_id=$(echo "$level3_children" | jq -r --arg name "$search_name" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' 2>/dev/null | head -1)
-                if [ -n "$folder_id" ]; then
-                    echo "$folder_id"
-                    return 0
-                fi
-            done
-
-            return 1
-        }
-
-        dest_folder_id=$(find_folder_id "$folder_name")
+        dest_folder_id=$(resolve_folder_id "$folder_name") || true
 
         if [ -z "$dest_folder_id" ]; then
             echo "Error: Folder '$folder_name' not found"
@@ -1327,23 +1355,9 @@ ${existing_body}"
             payload=$(jq -n --arg name "$folder_name" '{"displayName": $name}')
             result=$(api_call POST "/me/mailFolders" "$payload")
         else
-            # Find parent folder ID
+            # Find parent folder ID (shared resolver: aliases, name, or path)
             echo "Finding parent folder '$parent_folder'..."
-
-            # Check well-known folder names
-            case "$parent_folder" in
-                inbox|drafts|sentitems|deleteditems|archive|junkemail)
-                    parent_id=$(api_call GET "/me/mailFolders/$parent_folder" | jq -r '.id // empty')
-                    ;;
-                *)
-                    # Search for folder by name
-                    parent_id=$(api_call GET "/me/mailFolders?\$top=100" | jq -r --arg name "$parent_folder" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' | head -1)
-                    if [ -z "$parent_id" ]; then
-                        # Search in inbox subfolders
-                        parent_id=$(api_call GET "/me/mailFolders/inbox/childFolders?\$top=100" | jq -r --arg name "$parent_folder" '.value[] | select(.displayName | ascii_downcase == ($name | ascii_downcase)) | .id' | head -1)
-                    fi
-                    ;;
-            esac
+            parent_id=$(resolve_folder_id "$parent_folder") || true
 
             if [ -z "$parent_id" ]; then
                 echo "Error: Parent folder '$parent_folder' not found"

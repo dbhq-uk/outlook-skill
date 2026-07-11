@@ -27,6 +27,14 @@ install.sh / install-codex.sh  # local symlink installers (Claude / Codex)
 ## Validating a change
 
 ```bash
-bash -n skills/outlook/scripts/*.sh     # scripts parse
-claude plugin validate .                # manifest + structure
+bash -n skills/outlook/scripts/*.sh          # scripts parse
+shellcheck skills/outlook/scripts/*.sh       # lint (warnings should be clean)
+bash skills/outlook/tests/helpers_test.sh    # offline unit tests (no account needed)
+claude plugin validate .                     # manifest + structure
 ```
+
+`tests/helpers_test.sh` extracts the pure helpers (search encoding/paging/sort,
+folder resolution, token-expiry logic) from the scripts and runs them against a
+mocked Graph API, so it catches regressions without a live mailbox. Anything that
+needs real Graph calls (token refresh, actual search results) still wants a
+manual smoke test against a configured account.
