@@ -112,7 +112,9 @@ eq "token no expires_at -> refresh" "refresh" "$(decide tok 0)"
 # only a transport failure (curl non-zero) becomes a NetworkError; an
 # InvalidAuthenticationToken body triggers one refresh + retry.
 ########################################
+eval "$(extract_fn _api_call)"
 eval "$(extract_fn api_call)"
+eval "$(extract_fn api_call_file)"
 ACCESS_TOKEN="tok"
 refresh_access_token() { echo "newtok"; }
 
@@ -141,7 +143,39 @@ _graph_request() {
 unset OUTLOOK_TOKEN_RETRIED
 eq "api_call auth-retry recovers" "ok" "$(api_call GET /x | jq -r '.value[0]')"
 
-rm -f /tmp/outlook_test_last_url /tmp/outlook_test_calls
+########################################
+# api_call_file: the attachment path streams its body from a file rather than an
+# argv string, but must inherit the SAME retry/error behaviour as api_call. It
+# is the call most exposed to a mid-run token expiry (a slow upload, issued
+# after the draft is created), and an empty body from a dropped token would be
+# read as success by callers that only check for ".error".
+########################################
+body_file=$(mktemp); printf '%s' '{"name":"big.pdf"}' > "$body_file"
+
+_graph_request_file() { return 0; }                  # empty body, success (204)
+unset OUTLOOK_TOKEN_RETRIED
+eq "api_call_file empty-204 stays empty" "" "$(api_call_file POST /x "$body_file")"
+
+_graph_request_file() { return 7; }                  # transport failure, empty
+unset OUTLOOK_TOKEN_RETRIED
+eq "api_call_file transport-fail -> NetworkError" "NetworkError" \
+   "$(api_call_file POST /x "$body_file" | jq -r '.error.code')"
+
+# Auth error, then success: the retry must re-read the body file and use the
+# refreshed token.
+echo 0 > /tmp/outlook_test_calls
+_graph_request_file() {
+    local n; n=$(cat /tmp/outlook_test_calls); n=$((n+1)); echo "$n" > /tmp/outlook_test_calls
+    if [ "$n" = 1 ]; then printf '%s' '{"error":{"code":"InvalidAuthenticationToken","message":"expired"}}'
+    else jq -c --arg tok "$ACCESS_TOKEN" '{name: .name, token: $tok}' < "$3"; fi
+    return 0
+}
+unset OUTLOOK_TOKEN_RETRIED
+retry_out=$(api_call_file POST /x "$body_file")
+eq "api_call_file auth-retry re-reads body file" "big.pdf" "$(printf '%s' "$retry_out" | jq -r '.name')"
+eq "api_call_file auth-retry uses refreshed token" "newtok" "$(printf '%s' "$retry_out" | jq -r '.token')"
+
+rm -f "$body_file" /tmp/outlook_test_last_url /tmp/outlook_test_calls
 echo "-----------------------------"
 printf 'PASS=%d FAIL=%d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -113,26 +113,55 @@ _graph_request() {
     fi
 }
 
-# API call helper. Transparently refreshes the token and retries once if Graph
-# rejects it mid-run (revoked, clock skew, or a race with local expiry). A
-# transport failure (curl non-zero) is turned into a JSON error so callers can
-# surface it — but a legitimately empty body (HTTP 204/202 from DELETE/send) is
-# left empty, since callers treat "no .error" as success.
-api_call() {
+# As _graph_request, but streams the body from a FILE rather than an argv string.
+# Required for any payload that can exceed Linux's ~128KB single-argument limit
+# (MAX_ARG_STRLEN) - notably base64 file attachments, where `-d "$data"` fails
+# with "Argument list too long" for files larger than ~96KB.
+_graph_request_file() {
+    local method="$1"
+    local endpoint="$2"
+    local body_file="$3"
+
+    curl -s -X "$method" "${GRAPH_URL}${endpoint}" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json" \
+        --data-binary @"$body_file"
+}
+
+# Shared retry/error wrapper around a low-level request function ($1), so every
+# Graph call gets the same behaviour regardless of how its body is sent.
+# Transparently refreshes the token and retries once if Graph rejects it mid-run
+# (revoked, clock skew, or a race with local expiry). A transport failure (curl
+# non-zero) is turned into a JSON error so callers can surface it — but a
+# legitimately empty body (HTTP 204/202 from DELETE/send) is left empty, since
+# callers treat "no .error" as success.
+_api_call() {
+    local transport="$1"; shift
     local response rc
-    response=$(_graph_request "$@") && rc=0 || rc=$?
+    response=$("$transport" "$@") && rc=0 || rc=$?
 
     if [ -z "${OUTLOOK_TOKEN_RETRIED:-}" ] && \
        printf '%s' "$response" | jq -e 'objects | .error.code == "InvalidAuthenticationToken"' >/dev/null 2>&1; then
         OUTLOOK_TOKEN_RETRIED=1
         ACCESS_TOKEN=$(refresh_access_token) || true
-        response=$(_graph_request "$@") && rc=0 || rc=$?
+        response=$("$transport" "$@") && rc=0 || rc=$?
     fi
 
     if [ "$rc" -ne 0 ] && [ -z "$response" ]; then
         response='{"error":{"code":"NetworkError","message":"Request to Microsoft Graph failed (network error, timeout, or connectivity issue)."}}'
     fi
     printf '%s' "$response"
+}
+
+# API call helper: request body passed as an argv string.
+api_call() {
+    _api_call _graph_request "$@"
+}
+
+# As api_call, but streams the request body from a file. Used by the attachment
+# upload path, whose base64 payload would otherwise overflow MAX_ARG_STRLEN.
+api_call_file() {
+    _api_call _graph_request_file "$@"
 }
 
 # Cache message IDs from an API response for fast short-ID resolution.
@@ -1603,25 +1632,32 @@ ${existing_body}"
             # Simple upload for small files
             echo "Attaching $file_name ($(echo "scale=1; $file_size / 1024" | bc)KB)..."
 
-            # Base64 encode (handle Linux vs Mac)
+            # Base64 encode to a TEMP FILE, never a shell variable: a variable
+            # would be passed to jq/curl as an argv string and blow Linux's
+            # ~128KB MAX_ARG_STRLEN limit ("Argument list too long") for any
+            # attachment over ~96KB. Keep the bytes off the command line.
+            b64_file=$(mktemp) || { echo "Error: cannot create temp file"; exit 1; }
+            payload_file=$(mktemp) || { rm -f "$b64_file"; echo "Error: cannot create temp file"; exit 1; }
+
             if base64 --help 2>&1 | grep -q GNU; then
-                file_content=$(base64 -w0 "$file_path")
+                base64 -w0 "$file_path" > "$b64_file"
             else
-                file_content=$(base64 -i "$file_path" | tr -d '\n')
+                base64 -i "$file_path" | tr -d '\n' > "$b64_file"
             fi
 
-            payload=$(jq -n \
+            jq -n \
                 --arg name "$file_name" \
                 --arg contentType "$content_type" \
-                --arg contentBytes "$file_content" \
+                --rawfile contentBytes "$b64_file" \
                 '{
                     "@odata.type": "#microsoft.graph.fileAttachment",
                     "name": $name,
                     "contentType": $contentType,
-                    "contentBytes": $contentBytes
-                }')
+                    "contentBytes": ($contentBytes | rtrimstr("\n"))
+                }' > "$payload_file"
 
-            result=$(api_call POST "/me/messages/$draft_id/attachments" "$payload")
+            result=$(api_call_file POST "/me/messages/$draft_id/attachments" "$payload_file")
+            rm -f "$b64_file" "$payload_file"
 
             if echo "$result" | jq -e '.error' > /dev/null 2>&1; then
                 echo "Error attaching file:"
