@@ -21,6 +21,39 @@ jobs:
           done < <(find skills -name '*.sh')
           exit $fail
 
+      # md_to_html shells out to pandoc, and the suite SKIPS its tests when pandoc
+      # is absent. The runner has no pandoc, so without this those assertions would
+      # quietly not run - and md_to_html builds the HTML body of every email the
+      # skill sends. A skipped test in a green build is the bug we are fixing here.
+      - name: Install pandoc (required by the md_to_html tests)
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends pandoc
+
+      # The suites are offline: they extract the real functions from the scripts
+      # and exercise them against a mocked api_call, so no account or network is
+      # needed. Discovered rather than listed, so a new *_test.sh is picked up.
+      - name: Run unit tests
+        run: |
+          fail=0
+          found=0
+          skipped=0
+          while IFS= read -r t; do
+            found=1
+            echo "::group::$t"
+            out=$(bash "$t" 2>&1) || fail=1
+            printf '%s\n' "$out"
+            if printf '%s\n' "$out" | grep -q '^skip - '; then skipped=1; fi
+            echo "::endgroup::"
+          done < <(find skills -name '*_test.sh' | sort)
+          if [ "$found" -eq 0 ]; then
+            echo "::error::No test suites found - the runner is not testing anything."
+            exit 1
+          fi
+          if [ "$skipped" -ne 0 ]; then
+            echo "::error::A suite skipped tests (missing dependency). CI must install it and run them."
+            fail=1
+          fi
+          exit $fail
+
       - name: Check SKILL.md frontmatter
         run: |
           python3 - <<'PY'
