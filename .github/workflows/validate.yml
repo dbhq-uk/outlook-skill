@@ -21,6 +21,22 @@ jobs:
           done < <(find skills -name '*.sh')
           exit $fail
 
+      # The suites are offline: they extract the real functions from the scripts
+      # and exercise them against a mocked api_call, so no account or network is
+      # needed. Discovered rather than listed, so a new *_test.sh is picked up.
+      - name: Run unit tests
+        run: |
+          fail=0
+          found=0
+          while IFS= read -r t; do
+            found=1
+            echo "::group::$t"
+            bash "$t" || fail=1
+            echo "::endgroup::"
+          done < <(find skills -name '*_test.sh' | sort)
+          if [ "$found" -eq 0 ]; then echo "No test suites found"; exit 1; fi
+          exit $fail
+
       - name: Check SKILL.md frontmatter
         run: |
           python3 - <<'PY'
