@@ -36,6 +36,22 @@ elif [ -L /etc/localtime ]; then
 fi
 [ -z "$DEFAULT_TIMEZONE" ] && DEFAULT_TIMEZONE="Europe/London"
 
+# Every time shown or accepted by this script is wall-clock in $DEFAULT_TIMEZONE.
+# Servers, containers and CI boxes almost always report UTC, while the mailbox
+# owner lives somewhere else - and then "your 13:00 interview" is really at 14:00
+# for them. Same instant, wrong wall-clock, missed meeting. We cannot read the
+# mailbox's own timezone (that needs a MailboxSettings.Read scope this app
+# deliberately does not request), so say so loudly rather than be quietly wrong.
+case "$DEFAULT_TIMEZONE" in
+    UTC|Etc/UTC|GMT|Etc/GMT|Universal)
+        if [ -z "$OUTLOOK_TZ" ]; then
+            echo "Note: times are in $DEFAULT_TIMEZONE (the system timezone). If your Outlook" >&2
+            echo "      calendar is in another zone, set OUTLOOK_TZ (e.g. OUTLOOK_TZ=Europe/London)" >&2
+            echo "      or every time below may be off by your UTC offset." >&2
+        fi
+        ;;
+esac
+
 # Check credentials
 if [ ! -f "$CREDS_FILE" ]; then
     echo "Error: Account '$ACCOUNT' not configured. Run: outlook-setup.sh --account $ACCOUNT"
@@ -146,6 +162,42 @@ api_call() {
     printf '%s' "$response"
 }
 
+# --- HTML -> readable plain text ---------------------------------------------
+# Injected into the `read` filter. Block-level tags become line breaks BEFORE
+# tags are stripped, so an event description with paragraphs, bullet points or a
+# Teams join block stays readable instead of collapsing into one run-on line.
+# Kept identical to the helper in outlook-mail.sh.
+HTML_TO_TEXT='
+    def html_to_text:
+        gsub("(?is)<(script|style)[^>]*>.*?</(script|style)>"; " ")
+      | gsub("(?i)<br[^>]*>"; "\n")
+      | gsub("(?i)<li[^>]*>"; "\n- ")
+      | gsub("(?i)</(p|div|tr|h[1-6]|blockquote|ul|ol|table)>"; "\n")
+      | gsub("(?i)</t[dh]>"; " ")
+      | gsub("<[^>]*>"; "")
+      | gsub("&nbsp;"; " ") | gsub("&amp;"; "&") | gsub("&lt;"; "<")
+      | gsub("&gt;"; ">") | gsub("&quot;"; "\"") | gsub("&#39;"; "'"'"'")
+      | gsub("&#8217;"; "'"'"'")
+      | gsub("[ \t]+"; " ")
+      | gsub(" *\n *"; "\n")
+      | gsub("\n{3,}"; "\n\n")
+      | sub("^\\s+"; "") | sub("\\s+$"; "");
+'
+
+# Fail loudly on a Graph error. Several commands used to pipe their response to
+# /dev/null and print "Event updated" unconditionally, so a REJECTED write (e.g.
+# PATCHing a start that lands after the existing end) still reported success and
+# the caller believed a change had been made that had not. Never claim a write
+# succeeded without looking at what Graph said.
+die_on_error() {
+    local response="$1" context="$2"
+    if [ -n "$response" ] && printf '%s' "$response" | jq -e '.error' > /dev/null 2>&1; then
+        echo "Error $context:" >&2
+        printf '%s' "$response" | jq -r '.error.message // .error.code' >&2
+        exit 1
+    fi
+}
+
 # Format event for display
 format_event() {
     jq -r '
@@ -165,17 +217,67 @@ format_events() {
     '
 }
 
-# Get today's date in ISO format
-today_start() {
-    date -u +"%Y-%m-%dT00:00:00Z"
+# --- Local-time window helpers ----------------------------------------------
+# Graph interprets a calendarView startDateTime/endDateTime that carries no UTC
+# offset as UTC. The user thinks in LOCAL time ("today", "am I free 9-5?"), so a
+# naive UTC window is wrong wherever local time != UTC: in BST (UTC+1) a query
+# for "the 16th" spans 16th 00:00Z-23:59Z, which is 01:00 on the 16th to 00:59
+# on the 17th locally - so it misses the first hour of the day and picks up an
+# all-day event that starts at local midnight on the 17th. Emitting an explicit
+# offset (2026-07-16T00:00:00+01:00) removes the ambiguity entirely.
+
+# URL-encode a query-string value. The offset in an ISO timestamp is a literal
+# "+", which means SPACE in a query string - unencoded, Graph receives a broken
+# datetime and the command dies. Everything below goes through this.
+urlencode() { jq -rn --arg s "$1" '$s|@uri'; }
+
+# Local wall-clock -> ISO 8601 with numeric offset, e.g. 2026-07-16T00:00:00+01:00
+local_iso() {
+    TZ="$DEFAULT_TIMEZONE" date -d "$1" +"%Y-%m-%dT%H:%M:%S%:z" 2>/dev/null \
+        || TZ="$DEFAULT_TIMEZONE" date -j -f "%Y-%m-%d %H:%M:%S" "$1" +"%Y-%m-%dT%H:%M:%S%z"
 }
 
-today_end() {
-    date -u +"%Y-%m-%dT23:59:59Z"
+# Local YYYY-MM-DD for a relative day expression ("today", "+7 days")
+local_date() {
+    TZ="$DEFAULT_TIMEZONE" date -d "$1" +"%Y-%m-%d" 2>/dev/null \
+        || TZ="$DEFAULT_TIMEZONE" date -v"$1" +"%Y-%m-%d"
 }
 
-week_end() {
-    date -u -d "+7 days" +"%Y-%m-%dT23:59:59Z" 2>/dev/null || date -u -v+7d +"%Y-%m-%dT23:59:59Z"
+day_start() { urlencode "$(local_iso "$1 00:00:00")"; }
+day_end()   { urlencode "$(local_iso "$1 23:59:59")"; }
+
+today_start() { day_start "$(local_date today)"; }
+today_end()   { day_end   "$(local_date today)"; }
+week_end()    { day_end   "$(local_date '+7 days')"; }
+
+# Resolve a short (20-char) event ID to its full ID. Searches upcoming events
+# first, then falls back to the most recent 250 events so past events can be
+# addressed too. Full-length IDs pass through untouched.
+resolve_event_id() {
+    local event_id="$1" start full_id
+    if [ ${#event_id} -gt 25 ]; then
+        printf '%s' "$event_id"
+        return 0
+    fi
+    start=$(today_start)
+    full_id=$(api_call GET "/me/calendar/events?\$filter=start/dateTime%20ge%20'$start'&\$top=100&\$select=id" \
+        | jq -r ".value[].id | select(endswith(\"$event_id\"))" | head -1)
+    if [ -z "$full_id" ]; then
+        full_id=$(api_call GET "/me/events?\$top=250&\$orderby=start/dateTime%20desc&\$select=id" \
+            | jq -r ".value[].id | select(endswith(\"$event_id\"))" | head -1)
+    fi
+    [ -n "$full_id" ] || return 1
+    printf '%s' "$full_id"
+}
+
+# Convert a comma/semicolon-separated address list into Graph attendee objects.
+# $2 = attendee type: required (default) or optional.
+attendees_to_json() {
+    jq -n --arg raw "$1" --arg type "${2:-required}" '
+        ($raw | gsub(";"; ",") | split(",")
+            | map(gsub("^\\s+|\\s+$"; ""))
+            | map(select(length > 0))
+            | map({emailAddress: {address: .}, type: $type}))'
 }
 
 # Commands
@@ -188,7 +290,7 @@ case "$1" in
         ;;
 
     today)
-        echo "Today's events..."
+        echo "Today's events ($DEFAULT_TIMEZONE)..."
         start=$(today_start)
         end=$(today_end)
         api_call GET "/me/calendar/calendarView?startDateTime=$start&endDateTime=$end&\$orderby=start/dateTime&\$select=id,subject,start,end,location" | format_events
@@ -208,19 +310,13 @@ case "$1" in
             exit 1
         fi
 
-        # Find full ID if short ID provided
-        if [ ${#event_id} -le 25 ]; then
-            start=$(today_start)
-            full_id=$(api_call GET "/me/calendar/events?\$filter=start/dateTime%20ge%20'$start'&\$top=100&\$select=id" | jq -r ".value[].id | select(endswith(\"$event_id\"))" | head -1)
-            if [ -z "$full_id" ]; then
-                echo "Error: Event not found with ID ending in: $event_id"
-                exit 1
-            fi
-            event_id="$full_id"
+        if ! event_id=$(resolve_event_id "$event_id"); then
+            echo "Error: Event not found with ID ending in: $2"
+            exit 1
         fi
 
         echo "Event details..."
-        api_call GET "/me/calendar/events/$event_id" | jq -r '
+        api_call GET "/me/calendar/events/$event_id" | jq -r "$HTML_TO_TEXT"'
             "Subject: \(.subject // "(no subject)")",
             "Start: \(.start.dateTime) (\(.start.timeZone))",
             "End: \(.end.dateTime) (\(.end.timeZone))",
@@ -229,7 +325,8 @@ case "$1" in
             "Attendees: \([.attendees[]?.emailAddress | "\(.name // "") <\(.address)>"] | join(", ") | if . == "" then "-" else . end)",
             "Response: \(.responseStatus.response // "-")",
             "---",
-            "Body: \(.body.content | gsub("<[^>]*>"; "") | gsub("&nbsp;"; " ") | gsub("\\s+"; " ") | ltrimstr(" ") | if . == "" then "(no description)" else . end)"
+            "Body:",
+            ((.body.content // "") | html_to_text | if . == "" then "(no description)" else . end)
         '
         ;;
 
@@ -245,12 +342,17 @@ case "$1" in
         start_time="$3"
         end_time="$4"
         location="${5:-}"
+        attendees="${6:-}"
 
         if [ -z "$subject" ] || [ -z "$start_time" ] || [ -z "$end_time" ]; then
-            echo "Usage: outlook-calendar.sh create <subject> <start-time> <end-time> [location]"
+            echo "Usage: outlook-calendar.sh create <subject> <start-time> <end-time> [location] [attendees]"
             echo "Times in format: YYYY-MM-DDTHH:MM"
+            echo "Attendees: comma/semicolon-separated emails; pass \"\" for location"
+            echo "if you want attendees with no location. Invitations are sent."
             exit 1
         fi
+
+        attendees_json=$(attendees_to_json "$attendees")
 
         echo "Creating event..."
         payload=$(jq -n \
@@ -259,6 +361,7 @@ case "$1" in
             --arg end "$end_time" \
             --arg location "$location" \
             --arg tz "$DEFAULT_TIMEZONE" \
+            --argjson attendees "$attendees_json" \
             '{
                 subject: $subject,
                 start: {
@@ -269,7 +372,9 @@ case "$1" in
                     dateTime: $end,
                     timeZone: $tz
                 }
-            } + (if $location != "" then {location: {displayName: $location}} else {} end)')
+            }
+            + (if $location != "" then {location: {displayName: $location}} else {} end)
+            + (if ($attendees | length) > 0 then {attendees: $attendees} else {} end)')
 
         result=$(api_call POST "/me/calendar/events" "$payload")
         event_id=$(echo "$result" | jq -r '.id')
@@ -284,6 +389,57 @@ case "$1" in
         echo "Event ID: ${event_id: -20}"
         echo
         echo "$result" | jq -r '"Subject: \(.subject)", "Start: \(.start.dateTime)", "End: \(.end.dateTime)", "Location: \(.location.displayName // "-")"'
+        ;;
+
+    invite)
+        event_id="$2"
+        emails="$3"
+        att_type="${4:-required}"
+        if [ -z "$event_id" ] || [ -z "$emails" ]; then
+            echo "Usage: outlook-calendar.sh invite <event-id> <emails> [required|optional]"
+            echo "       Adds attendees to an existing event and SENDS them invitations."
+            echo "       Two-step flow: 'create' the event first (no attendees, nothing"
+            echo "       sent), confirm the details, then 'invite'. Emails are"
+            echo "       comma/semicolon-separated; re-inviting an address is a no-op."
+            exit 1
+        fi
+        case "$att_type" in
+            required|optional) ;;
+            *) echo "Error: attendee type must be 'required' or 'optional'"; exit 1 ;;
+        esac
+        if ! event_id=$(resolve_event_id "$event_id"); then
+            echo "Error: Event not found"
+            exit 1
+        fi
+
+        new_att=$(attendees_to_json "$emails" "$att_type")
+        if [ "$(echo "$new_att" | jq 'length')" -eq 0 ]; then
+            echo "Error: No valid attendee address provided"
+            exit 1
+        fi
+
+        # Merge with existing attendees (deduped, case-insensitive) so a repeat
+        # invite never duplicates anyone. Existing entries are stripped back to
+        # emailAddress + type - read-only fields like status must not be PATCHed.
+        existing=$(api_call GET "/me/events/$event_id?\$select=attendees" \
+            | jq '[.attendees[]? | {emailAddress: {address: .emailAddress.address}, type: .type}]')
+        payload=$(jq -n --argjson ex "$existing" --argjson new "$new_att" '
+            ($ex | map(.emailAddress.address // "" | ascii_downcase)) as $have
+            | {attendees: ($ex + ($new | map(select((.emailAddress.address // "" | ascii_downcase) as $a | ($have | index($a)) | not))))}')
+
+        echo "Sending invitations..."
+        result=$(api_call PATCH "/me/events/$event_id" "$payload")
+        if echo "$result" | jq -e '.error' > /dev/null 2>&1; then
+            echo "Error inviting attendees (only the organiser can invite):"
+            echo "$result" | jq -r '.error.message'
+            exit 1
+        fi
+        echo "Invitations sent!"
+        echo "$result" | jq -r '
+            "Subject:   \(.subject)",
+            "Start:     \(.start.dateTime)",
+            "Attendees: \([.attendees[]?.emailAddress.address] | join(", "))"
+        '
         ;;
 
     quick)
@@ -347,15 +503,9 @@ case "$1" in
             exit 1
         fi
 
-        # Find full ID if short ID provided
-        if [ ${#event_id} -le 25 ]; then
-            start=$(today_start)
-            full_id=$(api_call GET "/me/calendar/events?\$filter=start/dateTime%20ge%20'$start'&\$top=100&\$select=id" | jq -r ".value[].id | select(endswith(\"$event_id\"))" | head -1)
-            if [ -z "$full_id" ]; then
-                echo "Error: Event not found"
-                exit 1
-            fi
-            event_id="$full_id"
+        if ! event_id=$(resolve_event_id "$event_id"); then
+            echo "Error: Event not found"
+            exit 1
         fi
 
         echo "Updating event..."
@@ -379,8 +529,13 @@ case "$1" in
                 ;;
         esac
 
-        api_call PATCH "/me/calendar/events/$event_id" "$payload" > /dev/null
+        # Graph rejects a start later than the current end (and vice versa). When
+        # moving an event, update the bound that keeps start < end first, or set
+        # both. The error is now surfaced instead of being reported as success.
+        result=$(api_call PATCH "/me/calendar/events/$event_id" "$payload")
+        die_on_error "$result" "updating event"
         echo "Event updated"
+        printf '%s' "$result" | jq -r '"  \(.subject) | \(.start.dateTime) -> \(.end.dateTime)"' 2>/dev/null || true
         ;;
 
     delete)
@@ -390,19 +545,105 @@ case "$1" in
             exit 1
         fi
 
-        # Find full ID if short ID provided
-        if [ ${#event_id} -le 25 ]; then
-            start=$(today_start)
-            full_id=$(api_call GET "/me/calendar/events?\$filter=start/dateTime%20ge%20'$start'&\$top=100&\$select=id" | jq -r ".value[].id | select(endswith(\"$event_id\"))" | head -1)
-            if [ -z "$full_id" ]; then
-                echo "Error: Event not found"
-                exit 1
-            fi
-            event_id="$full_id"
+        if ! event_id=$(resolve_event_id "$event_id"); then
+            echo "Error: Event not found"
+            exit 1
         fi
 
-        api_call DELETE "/me/calendar/events/$event_id" > /dev/null
+        result=$(api_call DELETE "/me/calendar/events/$event_id")
+        die_on_error "$result" "deleting event"
         echo "Event deleted"
+        ;;
+
+    cancel)
+        event_id="$2"
+        comment="${3:-}"
+        if [ -z "$event_id" ]; then
+            echo "Usage: outlook-calendar.sh cancel <event-id> [comment]"
+            echo "       Cancels a meeting YOU organise and notifies attendees."
+            echo "       To decline someone else's invite, use: respond <id> decline"
+            exit 1
+        fi
+        if ! event_id=$(resolve_event_id "$event_id"); then
+            echo "Error: Event not found"
+            exit 1
+        fi
+        echo "Cancelling event and notifying attendees..."
+        result=$(api_call POST "/me/events/$event_id/cancel" "$(jq -n --arg c "$comment" '{comment: $c}')")
+        if [ -n "$result" ] && echo "$result" | jq -e '.error' > /dev/null 2>&1; then
+            echo "Error cancelling event (are you the organiser? if not, use 'respond <id> decline'):"
+            echo "$result" | jq -r '.error.message'
+            exit 1
+        fi
+        echo "Event cancelled"
+        ;;
+
+    respond)
+        event_id="$2"
+        answer="$3"
+        comment="${4:-}"
+        if [ -z "$event_id" ] || [ -z "$answer" ]; then
+            echo "Usage: outlook-calendar.sh respond <event-id> <accept|decline|tentative> [comment]"
+            echo "       Responds to a meeting invitation and notifies the organiser."
+            exit 1
+        fi
+        case "$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')" in
+            accept)    action="accept" ;;
+            decline)   action="decline" ;;
+            tentative) action="tentativelyAccept" ;;
+            *) echo "Error: response must be accept, decline, or tentative"; exit 1 ;;
+        esac
+        if ! event_id=$(resolve_event_id "$event_id"); then
+            echo "Error: Event not found"
+            exit 1
+        fi
+        echo "Sending '$answer' response..."
+        payload=$(jq -n --arg c "$comment" '{sendResponse: true} + (if $c != "" then {comment: $c} else {} end)')
+        result=$(api_call POST "/me/events/$event_id/$action" "$payload")
+        if [ -n "$result" ] && echo "$result" | jq -e '.error' > /dev/null 2>&1; then
+            echo "Error responding to event:"
+            echo "$result" | jq -r '.error.message'
+            exit 1
+        fi
+        echo "Response sent: $answer"
+        ;;
+
+    day)
+        day="$2"
+        if [ -z "$day" ]; then
+            echo "Usage: outlook-calendar.sh day <YYYY-MM-DD>"
+            exit 1
+        fi
+        if ! [[ "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "Error: date must be in YYYY-MM-DD format"
+            exit 1
+        fi
+        echo "Events on $day ($DEFAULT_TIMEZONE)..."
+        api_call GET "/me/calendar/calendarView?startDateTime=$(day_start "$day")&endDateTime=$(day_end "$day")&\$orderby=start/dateTime&\$select=id,subject,start,end,location" | format_events
+        ;;
+
+    search)
+        query="$2"
+        days="${3:-90}"
+        if [ -z "$query" ]; then
+            echo "Usage: outlook-calendar.sh search <text> [days]"
+            echo "       Case-insensitive match on subject/location over the next"
+            echo "       <days> days (default 90)."
+            exit 1
+        fi
+        [[ "$days" =~ ^[0-9]+$ ]] || days=90
+        start=$(today_start)
+        end=$(day_end "$(local_date "+$days days")")
+        echo "Searching events for '$query' (next $days days)..."
+        matches=$(api_call GET "/me/calendar/calendarView?startDateTime=$start&endDateTime=$end&\$orderby=start/dateTime&\$top=250&\$select=id,subject,start,end,location" \
+            | jq --arg q "$query" '{value: [.value[]? | select(
+                ((.subject // "") + " " + (.location.displayName // "")) | ascii_downcase | contains($q | ascii_downcase)
+              )]}')
+        if [ "$(echo "$matches" | jq '.value | length')" -eq 0 ]; then
+            echo "No matching events found."
+        else
+            echo "$matches" | format_events
+        fi
         ;;
 
     free)
@@ -415,10 +656,17 @@ case "$1" in
             exit 1
         fi
 
-        echo "Checking availability from $start_time to $end_time..."
+        echo "Checking availability from $start_time to $end_time ($DEFAULT_TIMEZONE)..."
+
+        # The user means LOCAL wall-clock time ("am I free 9-5?"). Convert both
+        # bounds to an offset-qualified ISO string so Graph does not read them
+        # as UTC and shift the window (an hour out in BST) - a silent wrong
+        # answer here would have someone double-booked.
+        win_start=$(urlencode "$(local_iso "$(printf '%s' "$start_time" | tr 'T' ' '):00")")
+        win_end=$(urlencode "$(local_iso "$(printf '%s' "$end_time" | tr 'T' ' '):00")")
 
         # Get events in range
-        events=$(api_call GET "/me/calendar/calendarView?startDateTime=${start_time}:00&endDateTime=${end_time}:00&\$orderby=start/dateTime&\$select=subject,start,end")
+        events=$(api_call GET "/me/calendar/calendarView?startDateTime=${win_start}&endDateTime=${win_end}&\$orderby=start/dateTime&\$select=subject,start,end")
 
         event_count=$(echo "$events" | jq '.value | length')
 
@@ -442,18 +690,27 @@ case "$1" in
         echo "  events [count]             List upcoming events"
         echo "  today                      Today's events"
         echo "  week                       This week's events"
+        echo "  day <YYYY-MM-DD>           Events on a specific date"
+        echo "  search <text> [days]       Find events by subject/location (default: next 90 days)"
         echo "  read <id>                  Event details"
         echo "  calendars                  List calendars"
         echo
         echo "Creating:"
-        echo "  create <subject> <start> <end> [location]"
-        echo "                             Create event"
+        echo "  create <subject> <start> <end> [location] [attendees]"
+        echo "                             Create event. Without attendees nothing is sent"
+        echo "                             (two-step: create, confirm, then 'invite')."
+        echo "                             Passing attendees sends invitations immediately."
+        echo "  invite <id> <emails> [required|optional]"
+        echo "                             Add attendees to an event and send invitations"
         echo "  quick <subject> <start>    Create 1-hour event"
         echo
         echo "Managing:"
         echo "  update <id> <field> <value>"
-        echo "                             Update event field"
-        echo "  delete <id>                Delete event"
+        echo "                             Update event field (subject/location/start/end)"
+        echo "  respond <id> <accept|decline|tentative> [comment]"
+        echo "                             Respond to a meeting invitation"
+        echo "  cancel <id> [comment]      Cancel a meeting you organise (notifies attendees)"
+        echo "  delete <id>                Delete event (no notification)"
         echo
         echo "Availability:"
         echo "  free <start> <end>         Check free/busy"

@@ -80,7 +80,7 @@ echo
 # Check for existing config
 if [ -f "$CONFIG_FILE" ]; then
     echo -e "${YELLOW}Existing configuration found at $CONFIG_FILE${NC}"
-    read -p "Overwrite? (y/N): " overwrite
+    read -rp "Overwrite? (y/N): " overwrite
     if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
         echo "Setup cancelled"
         exit 0
@@ -109,7 +109,7 @@ echo -e "${BLUE}Step 2/7: App Registration${NC}"
 if [ -n "$REUSE_CONFIG" ]; then
     REUSE_NAME=$(basename "$(dirname "$REUSE_CONFIG")")
     echo -e "${YELLOW}Found existing app registration from account '$REUSE_NAME'.${NC}"
-    read -p "Reuse it for '$ACCOUNT'? (recommended) (Y/n): " reuse_ans
+    read -rp "Reuse it for '$ACCOUNT'? (recommended) (Y/n): " reuse_ans
     if [[ ! "$reuse_ans" =~ ^[Nn]$ ]]; then
         CLIENT_ID=$(jq -r '.client_id' "$REUSE_CONFIG")
         CLIENT_SECRET=$(jq -r '.client_secret' "$REUSE_CONFIG")
@@ -124,7 +124,7 @@ if [ -z "$SKIP_APP_CREATE" ]; then
 
     if [ -n "$EXISTING_APP" ] && [ "$EXISTING_APP" != "None" ]; then
         echo -e "${YELLOW}Found existing app: $EXISTING_APP${NC}"
-        read -p "Use existing app? (Y/n): " use_existing
+        read -rp "Use existing app? (Y/n): " use_existing
         if [[ "$use_existing" =~ ^[Nn]$ ]]; then
             echo "Creating new app..."
             CLIENT_ID=$(az ad app create \
@@ -238,7 +238,7 @@ fi
 echo -e "${YELLOW}After signing in, you'll be redirected to a blank page.${NC}"
 echo -e "${YELLOW}Copy the ENTIRE URL from your browser's address bar and paste it here:${NC}"
 echo
-read -p "Paste redirect URL: " REDIRECT_URL
+read -rp "Paste redirect URL: " REDIRECT_URL
 
 # Extract authorization code
 AUTH_CODE=$(echo "$REDIRECT_URL" | sed -n 's/.*code=\([^&]*\).*/\1/p')

@@ -44,24 +44,23 @@ Mandatory rules:
 2. **When computing deadlines or "ago" references**, anchor against actual `date` output, not memory. Example: an email timestamped `2026-05-06T16:10:58Z` is Wednesday 6 May at 17:10 BST (UTC+1 in summer), not yesterday.
 3. **When an email is about to be sent**, confirm the date in the planned send is correct (the date you're embedding in the body must match the date the email will actually arrive).
 4. **Track timezone explicitly** (BST vs UTC). UK summer time = UTC+1. Microsoft Graph timestamps are UTC.
+5. **Check `OUTLOOK_TZ` before quoting any calendar time.** All calendar commands report and accept wall-clock time in the configured timezone, which defaults to the *system* timezone. Servers, containers and CI boxes are almost always UTC while the mailbox owner is not — and then a 14:00 London meeting is reported as "13:00". Same instant, wrong wall-clock, missed meeting. The calendar script prints its active timezone and warns when it is UTC-by-default; if that zone is not the user's, export `OUTLOOK_TZ` (e.g. `OUTLOOK_TZ=Europe/London`) before trusting any time.
 
 If unsure of the date or time, run `date` and `date -u` (UTC) before responding.
 
 ## Email font and formatting preferences
 
-The skill applies these inline styles to every markdown-converted email body, on every command (`mddraft`, `mdreply`, `followup`, `update mdbody`):
+The skill applies these inline styles to every markdown-converted email body, on every command (`mddraft`, `mdreply`, `forward`, `followup`, `update mdbody`):
 
 | Property | Value | Why inline |
 |---|---|---|
 | **Font family** | `'Aptos', 'Aptos Display', 'Segoe UI', Roboto, sans-serif` | Aptos is the Microsoft 365 default since 2024. Falls back to Segoe UI on older Outlook, Roboto / system sans on non-Microsoft clients. Inline `style=""` survives Outlook's `<style>`-block stripping. |
 | **Font size** | `14px` | Readable, professional |
-| **Line height** | `1.5` (mddraft / update mdbody) or `1.6` (mdreply / followup) | Comfortable spacing |
+| **Line height** | `1.5` (mddraft / update mdbody) or `1.6` (mdreply / forward / followup) | Comfortable spacing |
 | **Colour** | `#333` | Soft black; avoids harsh `#000` |
 | **Paragraph margin** | `0 0 14px 0` (inline on every `<p>` tag) | Outlook ignores `<p>` margins from `<style>` blocks but respects inline. Without this, paragraphs collapse together until Outlook re-renders the draft after an edit. |
 
-These are set in `scripts/outlook-mail.sh` — search for `font-family` and `<p style=` to locate the four code paths.
-
-To change font preferences globally, edit those four locations in the script.
+All of this is implemented in ONE place: the `md_to_html` helper (and its `FONT_STACK` variable) in `scripts/outlook-mail.sh`. To change font preferences globally, edit that helper.
 
 ## Multiple accounts
 
@@ -132,6 +131,13 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search "invoice" 50
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search 'subject:invoice AND from:jane@example.com'
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search 'from:acme.com AND body:renewal' all
 
+# Messages flagged for follow-up (newest first)
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh flagged
+
+# The whole conversation a message belongs to (oldest first) - use this to see
+# a full back-and-forth thread across inbox and sent items
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh thread <message-id>
+
 # Read full message (use ID from list)
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh read <message-id>
 
@@ -162,6 +168,11 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mdreply <message-id> "**Bold** reply
 # Send reply draft
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send <reply-draft-id>
 
+# Forward a message (creates a DRAFT with the quoted message + its attachments).
+# Recipients are comma/semicolon-separated; the optional comment is markdown.
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh forward <message-id> "to@example.com"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh forward <message-id> "a@x.com, b@y.com" "FYI - see the thread below, **deadline is Friday**."
+
 # Follow up on your own sent email (chaser)
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup <sent-message-id>
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup <sent-message-id> "Custom follow-up body in **markdown**"
@@ -177,6 +188,8 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> cc "one@example.co
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> bcc "bcc@example.com"
 # Pass an empty string to clear all CC/BCC recipients (e.g. to trim a reply-all to sender-only):
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> cc ""
+# Mark a draft high/low importance:
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> importance high
 
 # List drafts
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh drafts
@@ -222,6 +235,20 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh markread <message-id>
 
 # Mark as unread
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh markunread <message-id>
+
+# Flag / unflag for follow-up (list flagged messages with `flagged`)
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh flag <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh unflag <message-id>
+
+# Categories: list the mailbox's master category names, then apply them.
+# Comma-separated list replaces the message's categories; "" clears them.
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh categories
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh categorize <message-id> "Red category, Invoices"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh categorize <message-id> ""
+
+# Junk handling (move to Junk Email / rescue back to Inbox)
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh junk <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh notjunk <message-id>
 
 # Delete
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh delete <message-id>
@@ -292,6 +319,13 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh today
 # This week
 ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh week
 
+# A specific date
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh day 2026-07-20
+
+# Find events by subject/location text (default: next 90 days)
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh search "board meeting"
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh search "dentist" 365
+
 # Read event details
 ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh read <event-id>
 
@@ -302,11 +336,52 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh calendars
 ### Creating Events
 
 ```bash
-# Create event (dates in YYYY-MM-DDTHH:MM format)
+# Create event (dates in YYYY-MM-DDTHH:MM format). Without attendees, NOTHING
+# is sent to anyone - this is the safe "draft" step.
 ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh create "Meeting subject" "2025-02-05T14:00" "2025-02-05T15:00" "Conference Room A"
 
 # Quick 1-hour event
 ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh quick "Team standup" "2025-02-05T09:00"
+```
+
+### Inviting Attendees (two-step flow - REQUIRED for meetings)
+
+Mirror the email draft-then-send workflow: `create` the event with no attendees
+(nothing is sent), show the user the event details AND the attendee list, and
+only after explicit approval run `invite` - that is the moment invitations go
+out.
+
+```bash
+# Step 1: create the event (no attendees - nothing sent)
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh create "Project kickoff" "2025-02-05T14:00" "2025-02-05T15:00" "Teams"
+
+# Step 2: after the user approves, send the invitations.
+# Emails are comma/semicolon-separated; re-inviting an address is a no-op
+# (deduped case-insensitively), so invite can be run again to add people.
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh invite <event-id> "a@x.com, b@y.com"
+
+# Optional (non-required) attendees:
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh invite <event-id> "c@z.com" optional
+```
+
+One-shot alternative: `create` also accepts an attendee list as a sixth
+argument (`create <subject> <start> <end> [location] [attendees]` - pass "" for
+location if there is none). This sends invitations IMMEDIATELY on creation, so
+only use it when the user has already approved the exact attendee list in this
+conversation. When in doubt, use the two-step flow.
+
+### Invitations and Cancellation
+
+```bash
+# Respond to a meeting invitation (notifies the organiser)
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh respond <event-id> accept
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh respond <event-id> decline "Sorry, I have a clash"
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh respond <event-id> tentative
+
+# Cancel a meeting YOU organise (notifies all attendees); `delete` removes an
+# event silently. Use cancel for meetings with attendees, delete for your own
+# solo events.
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh cancel <event-id> "Postponed - new invite to follow"
 ```
 
 ### Availability
@@ -412,12 +487,15 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send <draft-id>
 
 ## Workflow: Creating Calendar Events
 
-Always confirm before creating:
+Always confirm before creating, and never send invitations without a second
+explicit approval:
 
-1. Parse user's request for: subject, start time, end time, location
+1. Parse user's request for: subject, start time, end time, location, attendees
 2. Show proposed event details to user
 3. Wait for confirmation or adjustments
-4. Create event only after explicit "yes" / approval
+4. Create event only after explicit "yes" / approval - WITHOUT attendees
+5. If the meeting has attendees: show the attendee list, wait for explicit
+   approval, then send invitations with `invite <event-id> <emails>`
 
 ## Error Handling
 
