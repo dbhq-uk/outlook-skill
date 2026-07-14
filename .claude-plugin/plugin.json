@@ -1,7 +1,7 @@
 {
   "name": "outlook",
-  "description": "Microsoft 365 email and calendar for Claude Code and Codex - inbox, search, drafts, reply-all-safe replies, attachments up to 150 MB, calendar and availability, via the Microsoft Graph API.",
-  "version": "1.0.0",
+  "description": "Microsoft 365 email and calendar for Claude Code and Codex - inbox, search, threads, drafts, reply-all-safe replies, forwards, flags and categories, attachments up to 150 MB, calendar with invites and responses, via the Microsoft Graph API.",
+  "version": "1.1.0",
   "author": {
     "name": "DBHQ",
     "email": "dan@dbhq.uk"

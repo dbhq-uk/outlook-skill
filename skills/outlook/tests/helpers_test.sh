@@ -19,6 +19,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MAIL="$SCRIPT_DIR/scripts/outlook-mail.sh"
+CAL="$SCRIPT_DIR/scripts/outlook-calendar.sh"
 GRAPH_URL="https://graph.microsoft.com/v1.0"
 
 PASS=0; FAIL=0
@@ -29,11 +30,88 @@ eq() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); printf 'ok   - %s\n' "$1";
 # out of the live script so the tests track the real implementation.
 extract_fn() { awk "/^$1\\(\\) \\{/{f=1} f{print} f&&/^\\}/{exit}" "$MAIL"; }
 
+extract_cal_fn() { awk "/^$1\\(\\) \\{/{f=1} f{print} f&&/^\\}/{exit}" "$CAL"; }
+
 eval "$(extract_fn urlencode)"
 eval "$(extract_fn run_message_search)"
 eval "$(extract_fn _find_folder_by_name)"
 eval "$(extract_fn _resolve_folder_path)"
 eval "$(extract_fn resolve_folder_id)"
+eval "$(extract_fn recipients_to_json)"
+eval "$(extract_fn md_to_html)"
+eval "$(extract_cal_fn attendees_to_json)"
+eval "$(extract_cal_fn resolve_event_id)"
+
+########################################
+# recipients_to_json / attendees_to_json
+########################################
+eq "recipients split+trim" "a@x.com,b@y.com,c@z.com" \
+   "$(recipients_to_json ' a@x.com, b@y.com ; c@z.com ' | jq -r '[.[].emailAddress.address]|join(",")')"
+eq "recipients drops empties" "1" \
+   "$(recipients_to_json 'a@x.com,, ;' | jq 'length')"
+eq "attendees default required" "a@x.com|required" \
+   "$(attendees_to_json 'a@x.com' | jq -r '.[0] | "\(.emailAddress.address)|\(.type)"')"
+eq "attendees typed optional" "optional" \
+   "$(attendees_to_json 'a@x.com' optional | jq -r '.[0].type')"
+eq "attendees empty -> []" "0" "$(attendees_to_json '' | jq 'length')"
+
+########################################
+# html_to_text: the `read` renderer. Block tags MUST become line breaks before
+# tags are stripped, or paragraphs run together ("Hello,This is...") and list
+# items merge - which would garble the very thing the skill insists on reading
+# end-to-end.
+########################################
+# Eval the real assignment out of the script (rather than scraping the raw text,
+# which still carries its shell quote-escaping) so the tests exercise the exact
+# jq program the script runs.
+eval "$(sed -n "/^HTML_TO_TEXT='/,/^'\$/p" "$MAIL")"
+htt() { jq -rn --arg h "$1" "$HTML_TO_TEXT"' $h | html_to_text'; }
+
+eq "html_to_text separates paragraphs" $'Hello,\nWorld' \
+   "$(htt '<p>Hello,</p><p>World</p>')"
+eq "html_to_text bullets each on own line" $'- one\n- two' \
+   "$(htt '<ul><li>one</li><li>two</li></ul>')"
+eq "html_to_text honours <br>" $'Regards,\nDan' \
+   "$(htt 'Regards,<br>Dan')"
+eq "html_to_text decodes entities" 'A & B < C > D' \
+   "$(htt '<p>A &amp; B &lt; C &gt; D</p>')"
+eq "html_to_text drops style/script content" 'Body' \
+   "$(htt '<style>p{color:red}</style><p>Body</p>')"
+eq "html_to_text collapses blank runs" $'A\n\nB' \
+   "$(htt '<p>A</p><div></div><div></div><p>B</p>')"
+eq "html_to_text empty body -> empty" "" "$(htt '')"
+
+########################################
+# md_to_html (skipped when pandoc is unavailable)
+########################################
+if command -v pandoc >/dev/null 2>&1; then
+    FONT_STACK="'Aptos', 'Aptos Display', 'Segoe UI', Roboto, sans-serif"
+    html=$(md_to_html $'First para\n\nSecond **bold** para')
+    case "$html" in *"'Aptos'"*) eq "md_to_html uses Aptos stack" ok ok;; *) eq "md_to_html uses Aptos stack" "contains 'Aptos'" "$html";; esac
+    case "$html" in *'<p style="margin: 0 0 14px 0;">'*) eq "md_to_html inlines <p> margins" ok ok;; *) eq "md_to_html inlines <p> margins" "contains <p style=" "$html";; esac
+    case "$html" in *'line-height: 1.5'*) eq "md_to_html default line-height" ok ok;; *) eq "md_to_html default line-height" "1.5" "$html";; esac
+    case "$(md_to_html 'x' 1.6)" in *'line-height: 1.6'*) eq "md_to_html reply line-height" ok ok;; *) eq "md_to_html reply line-height" "1.6" "?";; esac
+else
+    echo "skip - md_to_html tests (pandoc not installed)"
+fi
+
+########################################
+# resolve_event_id: passthrough, upcoming hit, past fallback, miss
+########################################
+api_call() {
+    local endpoint="$2"
+    case "$endpoint" in
+      "/me/calendar/events?"*) echo '{"value":[{"id":"AAAAlongupcomingevent111"},{"id":"AAAAlongupcomingevent222"}]}';;
+      "/me/events?"*)          echo '{"value":[{"id":"BBBBlongpasteventXYZ99999"}]}';;
+      *) echo '{"value":[]}';;
+    esac
+}
+today_start() { echo "2026-01-01T00:00:00Z"; }
+LONG_ID="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+eq "event long id passthrough" "$LONG_ID" "$(resolve_event_id "$LONG_ID")"
+eq "event short id upcoming"   "AAAAlongupcomingevent222" "$(resolve_event_id 'event222')"
+eq "event short id past fallback" "BBBBlongpasteventXYZ99999" "$(resolve_event_id 'XYZ99999')"
+eq "event id miss -> rc1" "1" "$(resolve_event_id 'nomatch' >/dev/null; echo $?)"
 
 ########################################
 # urlencode
@@ -74,17 +152,21 @@ eq "search propagates error" "nope" "$(run_message_search 'x' 5 | jq -r '.error.
 
 ########################################
 # resolve_folder_id: BFS + path (mock tree)
-#   top-level: Inbox(IB) Archive(AR) Clients(CL)
+#   top-level: Deleted Items(DI) Inbox(IB) Archive(AR) Clients(CL)
 #   IB->Projects(PR)->Acme(A1) ; CL->Acme(A2)
+#   DI->Projects(GHOST) - a deleted folder keeps its name in the bin, and Graph
+#   lists Deleted Items BEFORE Inbox, so a bare name must NOT resolve to it.
 ########################################
 api_call() {
     local endpoint="$2"
     case "$endpoint" in
-      "/me/mailFolders?\$top=200") echo '{"value":[{"displayName":"Inbox","id":"IB"},{"displayName":"Archive","id":"AR"},{"displayName":"Clients","id":"CL"}]}';;
+      "/me/mailFolders?\$top=200") echo '{"value":[{"displayName":"Deleted Items","id":"DI"},{"displayName":"Inbox","id":"IB"},{"displayName":"Archive","id":"AR"},{"displayName":"Clients","id":"CL"}]}';;
+      "/me/mailFolders/DI/childFolders?\$top=200") echo '{"value":[{"displayName":"Projects","id":"GHOST"},{"displayName":"Acme","id":"GHOST2"}]}';;
       "/me/mailFolders/IB/childFolders?\$top=200") echo '{"value":[{"displayName":"Projects","id":"PR"}]}';;
       "/me/mailFolders/PR/childFolders?\$top=200") echo '{"value":[{"displayName":"Acme","id":"A1"}]}';;
       "/me/mailFolders/CL/childFolders?\$top=200") echo '{"value":[{"displayName":"Acme","id":"A2"}]}';;
       "/me/mailFolders/inbox") echo '{"id":"IB"}';;
+      "/me/mailFolders/deleteditems?\$select=id") echo '{"id":"DI"}';;
       *) echo '{"value":[]}';;
     esac
 }
@@ -95,6 +177,12 @@ eq "folder ambiguous->shallowest" "A2" "$(resolve_folder_id 'Acme')"
 eq "folder path Clients/Acme"    "A2" "$(resolve_folder_id 'Clients/Acme')"
 eq "folder path Inbox/Projects/Acme" "A1" "$(resolve_folder_id 'Inbox/Projects/Acme')"
 eq "folder not found -> rc1"     "1"  "$(resolve_folder_id 'Nope' >/dev/null; echo $?)"
+# The regression that matters: a same-named ghost in the bin must never win.
+eq "bare name skips Deleted Items ghost" "PR" "$(resolve_folder_id 'Projects')"
+eq "bare name skips bin even when only match" "1" \
+   "$(api_call() { case "$2" in "/me/mailFolders?\$top=200") echo '{"value":[{"displayName":"Deleted Items","id":"DI"},{"displayName":"Inbox","id":"IB"}]}';; "/me/mailFolders/DI/childFolders?\$top=200") echo '{"value":[{"displayName":"Old Project","id":"GHOST"}]}';; "/me/mailFolders/deleteditems?\$select=id") echo '{"id":"DI"}';; *) echo '{"value":[]}';; esac; }; resolve_folder_id 'Old Project' >/dev/null; echo $?)"
+eq "explicit bin path still resolves" "GHOST" \
+   "$(api_call() { case "$2" in "/me/mailFolders?\$top=200") echo '{"value":[{"displayName":"Deleted Items","id":"DI"},{"displayName":"Inbox","id":"IB"}]}';; "/me/mailFolders/DI/childFolders?\$top=200") echo '{"value":[{"displayName":"Old Project","id":"GHOST"}]}';; "/me/mailFolders/deleteditems?\$select=id") echo '{"id":"DI"}';; *) echo '{"value":[]}';; esac; }; resolve_folder_id 'Deleted Items/Old Project')"
 
 ########################################
 # token-expiry decision (mirrors ensure_valid_token's local check)
