@@ -11,3 +11,6 @@ Thumbs.db
 .outlook/
 *.token
 inbox/
+
+# Local agent tooling state
+.serena/
