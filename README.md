@@ -61,7 +61,7 @@ Read your inbox, draft and send properly formatted replies and forwards, triage 
 
 ```
 /plugin marketplace add dbhq-uk/marketplace
-/plugin install outlook@dbhq
+/plugin install outlook-graph@dbhq
 ```
 
 Then run the one-time setup the skill points you to, and talk to it in plain language: *"check my email"*, *"draft a reply to the last message from Sam"*, *"am I free Thursday afternoon"*.
@@ -69,8 +69,8 @@ Then run the one-time setup the skill points you to, and talk to it in plain lan
 ### Local install (Claude Code or Codex)
 
 ```bash
-git clone https://github.com/dbhq-uk/outlook-skill.git
-cd outlook-skill
+git clone https://github.com/dbhq-uk/outlook-graph-skill.git
+cd outlook-graph-skill
 ./install.sh          # Claude Code: symlinks into ~/.claude/skills (edits are live)
 ./install-codex.sh    # Codex: installs into ~/.codex/skills
 ```

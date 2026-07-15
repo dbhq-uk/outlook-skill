@@ -10,7 +10,7 @@ Set the skill up from source with a **live symlink install**, so your edits are 
 ## 1. Clone
 
 ```bash
-git clone https://github.com/dbhq-uk/outlook-skill.git ~/dbhq-outlook
+git clone https://github.com/dbhq-uk/outlook-graph-skill.git ~/dbhq-outlook
 cd ~/dbhq-outlook
 ```
 
