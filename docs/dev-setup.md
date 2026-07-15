@@ -10,8 +10,8 @@ Set the skill up from source with a **live symlink install**, so your edits are 
 ## 1. Clone
 
 ```bash
-git clone https://github.com/dbhq-uk/outlook-graph-skill.git ~/dbhq-outlook
-cd ~/dbhq-outlook
+git clone https://github.com/dbhq-uk/outlook-graph-skill.git ~/dbhq-outlook-graph
+cd ~/dbhq-outlook-graph
 ```
 
 ## 2. Install (symlink)
@@ -43,4 +43,4 @@ Then, in Claude Code, try *"check my email"*.
 
 ## Working across machines
 
-Editing **anything** under `~/dbhq-outlook` (scripts or `SKILL.md`) is live immediately in Claude Code - the whole skill directory is symlinked. For Codex, re-run `./install-codex.sh` after a `SKILL.md` edit. If you develop on more than one machine, `git pull` before you start and `git push` when done to keep them in sync.
+Editing **anything** under `~/dbhq-outlook-graph` (scripts or `SKILL.md`) is live immediately in Claude Code - the whole skill directory is symlinked. For Codex, re-run `./install-codex.sh` after a `SKILL.md` edit. If you develop on more than one machine, `git pull` before you start and `git push` when done to keep them in sync.
