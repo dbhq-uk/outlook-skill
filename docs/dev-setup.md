@@ -28,7 +28,7 @@ The committed skill references its scripts via `${CLAUDE_SKILL_DIR}` (the skill'
 Complete the setup the installer offers, or run it directly:
 
 ```bash
-~/.claude/skills/outlook/scripts/outlook-setup.sh
+~/.claude/skills/outlook-graph/scripts/outlook-setup.sh
 ```
 
 It registers (or reuses) an Azure app and signs you in via OAuth. Credentials are stored under `~/.outlook/<account>/`, never in the repo, and tokens refresh automatically. If you've already set this up on another machine, you can copy `~/.outlook/` across instead of re-authenticating.
@@ -36,7 +36,7 @@ It registers (or reuses) an Azure app and signs you in via OAuth. Credentials ar
 ## 4. Verify
 
 ```bash
-~/.claude/skills/outlook/scripts/outlook-token.sh test
+~/.claude/skills/outlook-graph/scripts/outlook-token.sh test
 ```
 
 Then, in Claude Code, try *"check my email"*.

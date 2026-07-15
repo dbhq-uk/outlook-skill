@@ -77,7 +77,7 @@ cd outlook-graph-skill
 
 ## Setup
 
-First run launches `outlook-setup.sh`, which registers an Azure app and authenticates you via OAuth. Credentials are stored per account under `~/.outlook/<account>/` and never leave your machine. Tokens refresh automatically. See [`skills/outlook/references/setup.md`](skills/outlook/references/setup.md) for manual steps.
+First run launches `outlook-setup.sh`, which registers an Azure app and authenticates you via OAuth. Credentials are stored per account under `~/.outlook/<account>/` and never leave your machine. Tokens refresh automatically. See [`skills/outlook-graph/references/setup.md`](skills/outlook-graph/references/setup.md) for manual steps.
 
 ## Command reference
 

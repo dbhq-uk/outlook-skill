@@ -1,5 +1,5 @@
 ---
-name: outlook
+name: outlook-graph
 description: Use for email and calendar operations - checking inbox, sending emails, viewing calendar, scheduling events. Trigger on phrases like "check email", "draft email", "my calendar", "schedule", "am I free".
 ---
 

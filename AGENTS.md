@@ -10,9 +10,9 @@ The **Outlook** skill for AI coding agents - Microsoft 365 email and calendar vi
 
 ```
 .claude-plugin/plugin.json     # plugin manifest
-skills/outlook/SKILL.md        # the skill (agent-facing instructions)
-skills/outlook/scripts/        # bash scripts (self-contained: jq + curl + az)
-skills/outlook/references/     # manual setup guide
+skills/outlook-graph/SKILL.md  # the skill (agent-facing instructions)
+skills/outlook-graph/scripts/  # bash scripts (self-contained: jq + curl + az)
+skills/outlook-graph/references/  # manual setup guide
 install.sh / install-codex.sh  # local symlink installers (Claude / Codex)
 ```
 
@@ -27,9 +27,9 @@ install.sh / install-codex.sh  # local symlink installers (Claude / Codex)
 ## Validating a change
 
 ```bash
-bash -n skills/outlook/scripts/*.sh          # scripts parse
-shellcheck skills/outlook/scripts/*.sh       # lint (warnings should be clean)
-bash skills/outlook/tests/helpers_test.sh    # offline unit tests (no account needed)
+bash -n skills/outlook-graph/scripts/*.sh    # scripts parse
+shellcheck skills/outlook-graph/scripts/*.sh # lint (warnings should be clean)
+bash skills/outlook-graph/tests/helpers_test.sh  # offline unit tests (no account needed)
 claude plugin validate .                     # manifest + structure
 ```
 

@@ -47,7 +47,7 @@ echo "Installed as directory symlinks - all edits (scripts and SKILL.md) are liv
 echo
 
 # --- Setup / credentials ---
-SETUP="$SKILLS_ROOT/outlook/scripts/outlook-setup.sh"
+SETUP="$SKILLS_ROOT/outlook-graph/scripts/outlook-setup.sh"
 if [ -f "$HOME/.outlook/default/credentials.json" ] || [ -f "$HOME/.outlook/credentials.json" ]; then
   echo "Existing Outlook credentials found. Re-run setup any time with:"
   echo "  $SETUP"

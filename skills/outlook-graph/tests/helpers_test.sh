@@ -6,7 +6,7 @@
 # They cover: URL-encoding, KQL detection, search paging/sort/cap, folder
 # resolution (BFS + Parent/Child paths), and the token-expiry decision.
 #
-#   bash skills/outlook/tests/helpers_test.sh
+#   bash skills/outlook-graph/tests/helpers_test.sh
 #
 # Requires: jq, grep, awk (same tools the skill itself uses).
 #
