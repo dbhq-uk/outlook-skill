@@ -60,36 +60,36 @@ The skill applies these inline styles to every markdown-converted email body, on
 | **Colour** | `#333` | Soft black; avoids harsh `#000` |
 | **Paragraph margin** | `0 0 14px 0` (inline on every `<p>` tag) | Outlook ignores `<p>` margins from `<style>` blocks but respects inline. Without this, paragraphs collapse together until Outlook re-renders the draft after an edit. |
 
-All of this is implemented in ONE place: the `md_to_html` helper (and its `FONT_STACK` variable) in `scripts/outlook-mail.sh`. To change font preferences globally, edit that helper.
+All of this is implemented in ONE place: the `md_to_html` helper (and its `FONT_STACK` variable) in `scripts/outlook-graph-mail.sh`. To change font preferences globally, edit that helper.
 
 ## Multiple accounts
 
-Each account stores credentials under `~/.outlook/<account>/`. The active account is selected by (in order of precedence): `--account <name>` / `-a <name>` flag, the `OUTLOOK_ACCOUNT` env var, then `default`.
+Each account stores credentials under `~/.outlook-graph/<account>/`. The active account is selected by (in order of precedence): `--account <name>` / `-a <name>` flag, the `OUTLOOK_ACCOUNT` env var, then `default`.
 
 ```bash
 # Default account
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh inbox
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh inbox
 
 # Named account (flag)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh -a work inbox
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh -a work inbox
 
 # Named account (env var)
-OUTLOOK_ACCOUNT=work ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh inbox
+OUTLOOK_ACCOUNT=work ${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh inbox
 
 # List configured accounts
-${CLAUDE_SKILL_DIR}/scripts/outlook-token.sh list
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-token.sh list
 
 # Add a new account (reuses existing Azure app registration if one exists)
-${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh --account work
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-setup.sh --account work
 ```
 
-An existing single-account install at `~/.outlook/{config,credentials,id_cache}.json` is auto-migrated to `~/.outlook/default/` on the first run of any script.
+An existing single-account install at `~/.outlook-graph/{config,credentials,id_cache}.json` is auto-migrated to `~/.outlook-graph/default/` on the first run of any script.
 
-Calendar timezone is auto-detected from the system. Override with `OUTLOOK_TZ`, e.g. `OUTLOOK_TZ=America/New_York ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh today`.
+Calendar timezone is auto-detected from the system. Override with `OUTLOOK_TZ`, e.g. `OUTLOOK_TZ=America/New_York ${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh today`.
 
 ## Prerequisites
 
-- Credentials configured in `~/.outlook/<account>/` (run setup if not done)
+- Credentials configured in `~/.outlook-graph/<account>/` (run setup if not done)
 - Azure CLI, jq, curl installed
 
 **Note:** Tokens are automatically refreshed when needed. No manual intervention required.
@@ -100,99 +100,99 @@ Calendar timezone is auto-detected from the system. Override with `OUTLOOK_TZ`, 
 
 ```bash
 # List inbox (default 10 messages)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh inbox
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh inbox
 
 # List more messages
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh inbox 25
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh inbox 25
 
 # Unread only
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh unread
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh unread
 
 # Focused inbox only
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh focused
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh focused
 
 # List sent items (your sent emails)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh sent
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh sent 25
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh sent
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh sent 25
 
 # List messages from any folder by name (searches recursively)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh folder "Projects" 20
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh folder "Projects" 20
 
 # Filter by sender (newest first)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh from "john@example.com"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh from "john@example.com"
 
 # Search emails. Free text searches across fields; add a count (default 10, max
 # 1000, or "all"). Results come back ranked by Graph, then sorted newest-first.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search "project update"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search "invoice" 50
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh search "project update"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh search "invoice" 50
 
 # Search with KQL for precision: field operators (subject:, from:, to:, body:)
 # and booleans (AND/OR/NOT). The query is passed through to Graph's $search.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search 'subject:invoice AND from:jane@example.com'
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search 'from:acme.com AND body:renewal' all
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh search 'subject:invoice AND from:jane@example.com'
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh search 'from:acme.com AND body:renewal' all
 
 # Messages flagged for follow-up (newest first)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh flagged
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh flagged
 
 # The whole conversation a message belongs to (oldest first) - use this to see
 # a full back-and-forth thread across inbox and sent items
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh thread <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh thread <message-id>
 
 # Read full message (use ID from list)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh read <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh read <message-id>
 
 # Quick preview (subject, from, date, body preview)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh preview <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh preview <message-id>
 ```
 
 ### Sending Email
 
 ```bash
 # Create plain text draft
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh draft "recipient@example.com" "Subject" "Body text"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh draft "recipient@example.com" "Subject" "Body text"
 
 # Create markdown-formatted draft (converts to HTML)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mddraft "recipient@example.com" "Subject" "**Bold** and _italic_ text"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh mddraft "recipient@example.com" "Subject" "**Bold** and _italic_ text"
 
 # Send a draft (use draft ID)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send <draft-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh send <draft-id>
 
 # Reply to a message (plain text - creates draft, REPLY-ALL: includes original To: + Cc:)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh reply <message-id> "Reply body"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh reply <message-id> "Reply body"
 
 # Reply with markdown formatting (converts to HTML - creates draft, REPLY-ALL: includes original To: + Cc:)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mdreply <message-id> "**Bold** reply with _formatting_"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh mdreply <message-id> "**Bold** reply with _formatting_"
 
 # (For sender-only reply, create the draft then trim recipients via `update to`/`update cc`.)
 
 # Send reply draft
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send <reply-draft-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh send <reply-draft-id>
 
 # Forward a message (creates a DRAFT with the quoted message + its attachments).
 # Recipients are comma/semicolon-separated; the optional comment is markdown.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh forward <message-id> "to@example.com"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh forward <message-id> "a@x.com, b@y.com" "FYI - see the thread below, **deadline is Friday**."
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh forward <message-id> "to@example.com"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh forward <message-id> "a@x.com, b@y.com" "FYI - see the thread below, **deadline is Friday**."
 
 # Follow up on your own sent email (chaser)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup <sent-message-id>
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup <sent-message-id> "Custom follow-up body in **markdown**"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh followup <sent-message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh followup <sent-message-id> "Custom follow-up body in **markdown**"
 
 # Update an existing draft
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> subject "New subject line"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> body "Plain text body"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> mdbody "**Markdown** body"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> subject "New subject line"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> body "Plain text body"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> mdbody "**Markdown** body"
 # to: replaces the To line. cc/bcc: append to existing (deduped, case-insensitive).
 # All three accept a comma/semicolon-separated list of addresses.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> to "new-recipient@example.com"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> cc "one@example.com, two@example.com"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> bcc "bcc@example.com"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> to "new-recipient@example.com"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> cc "one@example.com, two@example.com"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> bcc "bcc@example.com"
 # Pass an empty string to clear all CC/BCC recipients (e.g. to trim a reply-all to sender-only):
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> cc ""
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> cc ""
 # Mark a draft high/low importance:
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> importance high
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> importance high
 
 # List drafts
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh drafts
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh drafts
 ```
 
 **Note:** `mddraft`, `mdreply`, and `update mdbody` require `pandoc` for markdown conversion. Install with `brew install pandoc` (macOS) or `apt install pandoc` (Linux).
@@ -206,19 +206,19 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh drafts
 **Reading attachments:**
 ```bash
 # List attachments on a message
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attachments <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh attachments <message-id>
 
 # Download ALL attachments to ./inbox/
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh download <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh download <message-id>
 
 # Download specific attachment
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh download <message-id> <attachment-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh download <message-id> <attachment-id>
 ```
 
 **Adding attachments to drafts:**
 ```bash
 # Add attachment to a draft (supports files up to 150MB)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attach <draft-id> <file-path>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh attach <draft-id> <file-path>
 ```
 
 Upload method is automatic based on file size:
@@ -231,44 +231,44 @@ Multiple attachments can be added by calling `attach` multiple times on the same
 
 ```bash
 # Mark as read
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh markread <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh markread <message-id>
 
 # Mark as unread
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh markunread <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh markunread <message-id>
 
 # Flag / unflag for follow-up (list flagged messages with `flagged`)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh flag <message-id>
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh unflag <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh flag <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh unflag <message-id>
 
 # Categories: list the mailbox's master category names, then apply them.
 # Comma-separated list replaces the message's categories; "" clears them.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh categories
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh categorize <message-id> "Red category, Invoices"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh categorize <message-id> ""
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh categories
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh categorize <message-id> "Red category, Invoices"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh categorize <message-id> ""
 
 # Junk handling (move to Junk Email / rescue back to Inbox)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh junk <message-id>
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh notjunk <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh junk <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh notjunk <message-id>
 
 # Delete
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh delete <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh delete <message-id>
 
 # Archive
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh archive <message-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh archive <message-id>
 
 # Move to any folder. Names resolve identically across move/batch-move/folder/
 # rename/rmdir/mkdir: a bare name is matched case-insensitively anywhere in the
 # folder tree (shallowest wins on a tie); use a "Parent/Child" path to target a
 # specific nested folder when the same name exists in more than one place.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh move <message-id> "Projects"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh move <message-id> "Clients/Acme"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh move <message-id> "Projects"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh move <message-id> "Clients/Acme"
 
 # Move MANY messages at once (batches of 20 via the Graph $batch endpoint).
 # The destination folder is resolved once, so this is far faster than looping
 # `move`. IDs may be passed as arguments or piped via stdin.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh batch-move "Projects" <id1> <id2> <id3>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh batch-move "Projects" <id1> <id2> <id3>
 # Pipe IDs from a listing (one per line or space-separated):
-some_command_that_prints_ids | ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh batch-move "Projects"
+some_command_that_prints_ids | ${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh batch-move "Projects"
 ```
 
 **Bulk sorting note:** to reorganise a whole inbox, list messages, group their
@@ -280,29 +280,29 @@ need to move it again, re-fetch ids from the destination folder first.
 
 ```bash
 # List top-level folders
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh folders
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh folders
 
 # List subfolders of a folder (default: inbox)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh subfolders
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh subfolders "Important"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh subfolders
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh subfolders "Important"
 
 # Create a new top-level folder
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Projects"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh mkdir "Projects"
 
 # Create a subfolder under an existing folder
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Acme" "Clients"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Urgent" inbox
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh mkdir "Acme" "Clients"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh mkdir "Urgent" inbox
 
 # Rename a folder (refuses well-known system folders)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rename "Old Name" "New Name"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh rename "Old Name" "New Name"
 
 # Delete a folder (refuses non-empty folders unless --force; refuses system
 # folders always). With --force, contents move to Deleted Items.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rmdir "Empty Folder"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rmdir "Old Folder" --force
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh rmdir "Empty Folder"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh rmdir "Old Folder" --force
 
 # Inbox statistics (total, unread counts)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh stats
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh stats
 ```
 
 ## Calendar Operations
@@ -311,26 +311,26 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh stats
 
 ```bash
 # Upcoming events (default 10)
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh events
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh events
 
 # Today's events
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh today
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh today
 
 # This week
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh week
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh week
 
 # A specific date
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh day 2026-07-20
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh day 2026-07-20
 
 # Find events by subject/location text (default: next 90 days)
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh search "board meeting"
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh search "dentist" 365
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh search "board meeting"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh search "dentist" 365
 
 # Read event details
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh read <event-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh read <event-id>
 
 # List calendars
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh calendars
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh calendars
 ```
 
 ### Creating Events
@@ -338,10 +338,10 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh calendars
 ```bash
 # Create event (dates in YYYY-MM-DDTHH:MM format). Without attendees, NOTHING
 # is sent to anyone - this is the safe "draft" step.
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh create "Meeting subject" "2025-02-05T14:00" "2025-02-05T15:00" "Conference Room A"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh create "Meeting subject" "2025-02-05T14:00" "2025-02-05T15:00" "Conference Room A"
 
 # Quick 1-hour event
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh quick "Team standup" "2025-02-05T09:00"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh quick "Team standup" "2025-02-05T09:00"
 ```
 
 ### Inviting Attendees (two-step flow - REQUIRED for meetings)
@@ -353,15 +353,15 @@ out.
 
 ```bash
 # Step 1: create the event (no attendees - nothing sent)
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh create "Project kickoff" "2025-02-05T14:00" "2025-02-05T15:00" "Teams"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh create "Project kickoff" "2025-02-05T14:00" "2025-02-05T15:00" "Teams"
 
 # Step 2: after the user approves, send the invitations.
 # Emails are comma/semicolon-separated; re-inviting an address is a no-op
 # (deduped case-insensitively), so invite can be run again to add people.
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh invite <event-id> "a@x.com, b@y.com"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh invite <event-id> "a@x.com, b@y.com"
 
 # Optional (non-required) attendees:
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh invite <event-id> "c@z.com" optional
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh invite <event-id> "c@z.com" optional
 ```
 
 One-shot alternative: `create` also accepts an attendee list as a sixth
@@ -374,21 +374,21 @@ conversation. When in doubt, use the two-step flow.
 
 ```bash
 # Respond to a meeting invitation (notifies the organiser)
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh respond <event-id> accept
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh respond <event-id> decline "Sorry, I have a clash"
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh respond <event-id> tentative
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh respond <event-id> accept
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh respond <event-id> decline "Sorry, I have a clash"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh respond <event-id> tentative
 
 # Cancel a meeting YOU organise (notifies all attendees); `delete` removes an
 # event silently. Use cancel for meetings with attendees, delete for your own
 # solo events.
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh cancel <event-id> "Postponed - new invite to follow"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh cancel <event-id> "Postponed - new invite to follow"
 ```
 
 ### Availability
 
 ```bash
 # Check free/busy
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh free "2025-02-05T09:00" "2025-02-05T17:00"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh free "2025-02-05T09:00" "2025-02-05T17:00"
 ```
 
 ## Workflow: Capturing Email to Notes
@@ -449,15 +449,15 @@ Always draft first, confirm, then send:
 **Example:**
 ```bash
 # Create draft
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh draft "bob@example.com" "Q4 Report" "Please find the report attached."
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh draft "bob@example.com" "Q4 Report" "Please find the report attached."
 # Output: Draft ID: xxxxxxxxxxxxxxxxxxxx
 
 # Attach files (can be called multiple times)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attach xxxxxxxxxxxxxxxxxxxx /path/to/report.pdf
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attach xxxxxxxxxxxxxxxxxxxx /path/to/data.xlsx
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh attach xxxxxxxxxxxxxxxxxxxx /path/to/report.pdf
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh attach xxxxxxxxxxxxxxxxxxxx /path/to/data.xlsx
 
 # Send after user confirms
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send xxxxxxxxxxxxxxxxxxxx
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh send xxxxxxxxxxxxxxxxxxxx
 ```
 
 ## Workflow: Sending Follow-up / Chaser Emails
@@ -473,16 +473,16 @@ When user wants to follow up on an email they sent:
 **Example:**
 ```bash
 # Find the original sent email
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh sent 20
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh sent 20
 
 # Create follow-up draft (default body)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup abc123xyz
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh followup abc123xyz
 
 # Or with custom message
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup abc123xyz "Hi, just checking in on this. Would be great to get your thoughts when you have a moment."
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh followup abc123xyz "Hi, just checking in on this. Would be great to get your thoughts when you have a moment."
 
 # Send after user confirms
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send <draft-id>
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh send <draft-id>
 ```
 
 ## Workflow: Creating Calendar Events
@@ -507,7 +507,7 @@ explicit approval:
 
 If not configured, run:
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-setup.sh
 ```
 
 See `references/setup.md` for manual setup instructions.

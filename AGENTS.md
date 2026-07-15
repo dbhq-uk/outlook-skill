@@ -18,10 +18,10 @@ install.sh / install-codex.sh  # local symlink installers (Claude / Codex)
 
 ## Conventions
 
-- Scripts are self-contained: they read credentials from `~/.outlook/<account>/` and have no bundled-path dependencies, so they run from any location.
+- Scripts are self-contained: they read credentials from `~/.outlook-graph/<account>/` and have no bundled-path dependencies, so they run from any location.
 - SKILL.md references scripts via `${CLAUDE_SKILL_DIR}` (the skill's own directory), which Claude Code substitutes for personal, project, and plugin installs alike. `install.sh` therefore symlinks the whole skill directory into `~/.claude/skills/` (no rewrite). `install-codex.sh` still rewrites the variable to the install path, since Codex does not substitute it.
 - Shell scripts use `set -e`; errors go to stderr, structured output to stdout.
-- No secrets in the repo - credentials live under `~/.outlook/`.
+- No secrets in the repo - credentials live under `~/.outlook-graph/`.
 - House style: British English, plain hyphens.
 
 ## Validating a change

@@ -3,7 +3,7 @@
 
 set -e
 
-BASE_DIR="$HOME/.outlook"
+BASE_DIR="$HOME/.outlook-graph"
 
 # Account resolution: --account/-a flag wins, else OUTLOOK_ACCOUNT env, else "default"
 ACCOUNT="${OUTLOOK_ACCOUNT:-default}"
@@ -28,7 +28,7 @@ if [ "$1" = "list" ]; then
         echo "  - $(basename "$dir")"
         found=1
     done
-    [ "$found" = 0 ] && echo "  (none configured — run outlook-setup.sh)"
+    [ "$found" = 0 ] && echo "  (none configured — run outlook-graph-setup.sh)"
     exit 0
 fi
 
@@ -39,7 +39,7 @@ CREDS_FILE="$CONFIG_DIR/credentials.json"
 # Check config exists
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "Error: Account '$ACCOUNT' not configured."
-    echo "Run: outlook-setup.sh --account $ACCOUNT"
+    echo "Run: outlook-graph-setup.sh --account $ACCOUNT"
     exit 1
 fi
 
@@ -50,14 +50,14 @@ SCOPE="offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read"
 case "$1" in
     refresh)
         if [ ! -f "$CREDS_FILE" ]; then
-            echo "Error: No credentials to refresh. Run outlook-setup.sh first."
+            echo "Error: No credentials to refresh. Run outlook-graph-setup.sh first."
             exit 1
         fi
 
         REFRESH_TOKEN=$(jq -r '.refresh_token' "$CREDS_FILE")
 
         if [ -z "$REFRESH_TOKEN" ] || [ "$REFRESH_TOKEN" = "null" ]; then
-            echo "Error: No refresh token found. Run outlook-setup.sh to re-authenticate."
+            echo "Error: No refresh token found. Run outlook-graph-setup.sh to re-authenticate."
             exit 1
         fi
 
@@ -99,7 +99,7 @@ case "$1" in
 
     test)
         if [ ! -f "$CREDS_FILE" ]; then
-            echo "Error: No credentials found. Run outlook-setup.sh first."
+            echo "Error: No credentials found. Run outlook-graph-setup.sh first."
             exit 1
         fi
 
@@ -113,7 +113,7 @@ case "$1" in
         if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
             ERROR=$(echo "$RESPONSE" | jq -r '.error.code')
             if [ "$ERROR" = "InvalidAuthenticationToken" ]; then
-                echo "Token expired. Run: outlook-token.sh refresh"
+                echo "Token expired. Run: outlook-graph-token.sh refresh"
             else
                 echo "Error:"
                 echo "$RESPONSE" | jq -r '.error.message'
@@ -131,7 +131,7 @@ case "$1" in
     status)
         if [ ! -f "$CREDS_FILE" ]; then
             echo "Status: Not configured"
-            echo "Run: outlook-setup.sh"
+            echo "Run: outlook-graph-setup.sh"
             exit 0
         fi
 
@@ -143,7 +143,7 @@ case "$1" in
 
         if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
             echo "Status: Token expired"
-            echo "Run: outlook-token.sh refresh"
+            echo "Run: outlook-graph-token.sh refresh"
         else
             NAME=$(echo "$RESPONSE" | jq -r '.displayName // .mail // "Unknown"')
             echo "Status: Connected"
@@ -154,7 +154,7 @@ case "$1" in
     *)
         echo "Outlook Token Management"
         echo
-        echo "Usage: outlook-token.sh <command>"
+        echo "Usage: outlook-graph-token.sh <command>"
         echo
         echo "Commands:"
         echo "  refresh    Refresh the access token"

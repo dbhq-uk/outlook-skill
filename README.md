@@ -53,7 +53,7 @@ Read your inbox, draft and send properly formatted replies and forwards, triage 
 > **Set `OUTLOOK_TZ` if your machine is not in your own timezone.** Calendar times default to the *system* timezone; on a server or container that is usually UTC, which would report a 14:00 London meeting as 13:00. Export `OUTLOOK_TZ=Europe/London` (or your zone) — the calendar script warns you when it is falling back to UTC.
 
 **Accounts**
-- Multiple accounts under `~/.outlook/<account>/`, selected by `--account` flag or `OUTLOOK_ACCOUNT` env var; one Azure app registration can be reused across mailboxes
+- Multiple accounts under `~/.outlook-graph/<account>/`, selected by `--account` flag or `OUTLOOK_ACCOUNT` env var; one Azure app registration can be reused across mailboxes
 
 ## Install
 
@@ -77,13 +77,13 @@ cd outlook-graph-skill
 
 ## Setup
 
-First run launches `outlook-setup.sh`, which registers an Azure app and authenticates you via OAuth. Credentials are stored per account under `~/.outlook/<account>/` and never leave your machine. Tokens refresh automatically. See [`skills/outlook-graph/references/setup.md`](skills/outlook-graph/references/setup.md) for manual steps.
+First run launches `outlook-graph-setup.sh`, which registers an Azure app and authenticates you via OAuth. Credentials are stored per account under `~/.outlook-graph/<account>/` and never leave your machine. Tokens refresh automatically. See [`skills/outlook-graph/references/setup.md`](skills/outlook-graph/references/setup.md) for manual steps.
 
 ## Command reference
 
 You normally just talk to the skill in plain language, but every command is also usable directly.
 
-`outlook-mail.sh`:
+`outlook-graph-mail.sh`:
 
 | Area | Commands |
 |---|---|
@@ -93,7 +93,7 @@ You normally just talk to the skill in plain language, but every command is also
 | Triage | `markread` · `markunread` · `flag` · `unflag` · `categorize <id> <cats>` · `categories` · `junk` · `notjunk` · `archive` · `delete` |
 | Organise | `move <id> <folder>` · `batch-move <folder> <ids…>` · `mkdir` · `rename` · `rmdir [--force]` · `folders` · `subfolders` · `stats` |
 
-`outlook-calendar.sh`:
+`outlook-graph-calendar.sh`:
 
 | Area | Commands |
 |---|---|
@@ -102,7 +102,7 @@ You normally just talk to the skill in plain language, but every command is also
 | Manage | `update <id> <field> <value>` · `respond <id> accept\|decline\|tentative [comment]` · `cancel <id> [comment]` · `delete <id>` |
 | Availability | `free <start> <end>` |
 
-`outlook-token.sh`: `refresh` · `get` · `test` · `status` · `list` (accounts).
+`outlook-graph-token.sh`: `refresh` · `get` · `test` · `status` · `list` (accounts).
 
 All scripts accept `--account <name>` / `-a <name>` (or `OUTLOOK_ACCOUNT`) before the command.
 
@@ -116,7 +116,7 @@ Want to hack on this skill or run it from source with live edits? See [`docs/dev
 
 ## Credentials and privacy
 
-No secrets live in this repository. Your tokens are stored locally under `~/.outlook/` and used only to talk to Microsoft Graph directly from your machine.
+No secrets live in this repository. Your tokens are stored locally under `~/.outlook-graph/` and used only to talk to Microsoft Graph directly from your machine.
 
 ## License
 

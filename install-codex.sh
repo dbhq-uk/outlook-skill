@@ -41,4 +41,4 @@ for src in "$SCRIPT_DIR"/skills/*/; do
 done
 
 echo
-echo "Installed for Codex. Run scripts/outlook-setup.sh if you have not configured credentials."
+echo "Installed for Codex. Run scripts/outlook-graph-setup.sh if you have not configured credentials."

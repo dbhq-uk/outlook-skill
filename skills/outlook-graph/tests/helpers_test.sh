@@ -1,5 +1,5 @@
 #!/bin/bash
-# Offline unit tests for the pure/logic helpers in outlook-mail.sh.
+# Offline unit tests for the pure/logic helpers in outlook-graph-mail.sh.
 #
 # These extract the real functions from the script and exercise them with a
 # mocked api_call + date, so no Microsoft account or network is required.
@@ -18,8 +18,8 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MAIL="$SCRIPT_DIR/scripts/outlook-mail.sh"
-CAL="$SCRIPT_DIR/scripts/outlook-calendar.sh"
+MAIL="$SCRIPT_DIR/scripts/outlook-graph-mail.sh"
+CAL="$SCRIPT_DIR/scripts/outlook-graph-calendar.sh"
 GRAPH_URL="https://graph.microsoft.com/v1.0"
 
 PASS=0; FAIL=0

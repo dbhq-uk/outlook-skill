@@ -7,8 +7,8 @@ Thumbs.db
 .idea/
 *.swp
 
-# Local credentials must never be committed (they live in ~/.outlook, not here)
-.outlook/
+# Local credentials must never be committed (they live in ~/.outlook-graph, not here)
+.outlook-graph/
 *.token
 inbox/
 
