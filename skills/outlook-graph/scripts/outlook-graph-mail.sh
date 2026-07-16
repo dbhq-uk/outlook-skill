@@ -421,33 +421,35 @@ recipients_to_json() {
 urlencode() { jq -rn --arg s "$1" '$s|@uri'; }
 
 # --- Send-as-alias ----------------------------------------------------------
-# Every address this mailbox can send as: its primary SMTP address first, then
-# each alias. Graph tags the primary with an uppercase "SMTP:" prefix and
-# aliases with lowercase "smtp:" - that casing IS the marker, so the greps below
-# are deliberately case-sensitive. Non-SMTP proxy entries (X500:, sip:) are
-# directory plumbing rather than mail addresses and are dropped. Tenants that
-# expose no proxyAddresses still get the one address they can send as.
+# Every address this mailbox can send as, primary first, then each alias.
+# Graph tags the primary with an uppercase "SMTP:" prefix and aliases with
+# lowercase "smtp:" - that casing IS the marker, so the selects below are
+# deliberately case-sensitive. Non-SMTP proxy entries (X500:, sip:) are
+# directory plumbing rather than mail addresses and are dropped.
+#
+# The primary falls back to .mail/.userPrincipalName per-address rather than
+# only when the whole SMTP list is empty: a mailbox can return aliases with no
+# uppercase-tagged primary, and keying the fallback off an empty list would then
+# drop the primary entirely and leave the first ALIAS wearing the primary slot.
+# Output is empty (not an error) when the lookup fails - callers distinguish
+# "no addresses" from "this address is not yours".
 sendable_addresses() {
     api_call GET "/me?\$select=mail,userPrincipalName,proxyAddresses" | jq -r '
-        ([(.proxyAddresses // [])[] | select(startswith("SMTP:")) | sub("^SMTP:"; "")]
-         + [(.proxyAddresses // [])[] | select(startswith("smtp:")) | sub("^smtp:"; "")])
-        as $smtp
-        | (if ($smtp | length) > 0 then $smtp else [(.mail // .userPrincipalName // "")] end)
-        | map(select(length > 0)) | .[]'
+        [(.proxyAddresses // [])[] | select(startswith("SMTP:")) | sub("^SMTP:"; "")] as $tagged
+        | ((($tagged | first) // .mail // .userPrincipalName // "") as $primary
+           | [$primary] + [(.proxyAddresses // [])[] | select(startswith("smtp:")) | sub("^smtp:"; "")])
+        | map(select(length > 0))
+        | reduce .[] as $a ([]; if (map(ascii_downcase) | index($a | ascii_downcase)) then . else . + [$a] end)
+        | .[]'
 }
 
-# True when $1 is one of this mailbox's own sendable addresses (case-insensitive).
-# Note a false result does NOT prove the send would fail: SendAs rights on a
-# shared mailbox or another user grant addresses that never appear in this
-# mailbox's proxyAddresses. Callers should warn, not block - Graph itself
-# rejects a genuinely unauthorised sender with ErrorSendAsDenied at send time.
-is_sendable_address() {
-    local want addr
+# True when $1 appears in the newline-separated address list on stdin
+# (case-insensitive). Pure: the caller fetches the list, so a check costs no
+# extra Graph round-trip and the list can be inspected before matching.
+address_in_list() {
+    local want
     want=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
-    while IFS= read -r addr; do
-        [ "$(printf '%s' "$addr" | tr '[:upper:]' '[:lower:]')" = "$want" ] && return 0
-    done < <(sendable_addresses)
-    return 1
+    tr '[:upper:]' '[:lower:]' | grep -qxF "$want"
 }
 
 # Build a Graph `from` object. A blank name is omitted rather than sent as
@@ -459,12 +461,26 @@ from_to_json() {
             + (if ($name | length) > 0 then {name: $name} else {} end))}'
 }
 
-# Warn, but never block, when an address is not one of the mailbox's own. See
-# is_sendable_address: a shared-mailbox SendAs right is invisible here, so
-# blocking would break a legitimate case. An unauthorised sender still cannot
-# leak out - Graph rejects it with ErrorSendAsDenied and nothing is sent.
+# Warn, but never block, when an address is not one of the mailbox's own. A
+# shared-mailbox SendAs right is real but never appears in this mailbox's
+# proxyAddresses, so blocking would break a legitimate case. An unauthorised
+# sender still cannot leak out - Graph rejects it with ErrorSendAsDenied at send
+# time and nothing goes out.
+#
+# An empty list means the lookup itself failed, NOT that the address is wrong;
+# saying "that is not your address" there would blame a perfectly valid alias
+# for a network blip.
 warn_if_not_sendable() {
-    is_sendable_address "$1" && return 0
+    local addrs
+    addrs=$(sendable_addresses)
+    if [ -z "$addrs" ]; then
+        {
+            echo "Warning: could not read this mailbox's own addresses, so '$1' has not been checked."
+            echo "  Proceeding: if the address is not permitted, the send fails with ErrorSendAsDenied."
+        } >&2
+        return 0
+    fi
+    printf '%s\n' "$addrs" | address_in_list "$1" && return 0
     {
         echo "Warning: '$1' is not one of this mailbox's own addresses."
         echo "  Run 'outlook-graph-mail.sh aliases' to list the addresses it can send as."
