@@ -190,12 +190,49 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> bcc "bcc@exa
 ${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> cc ""
 # Mark a draft high/low importance:
 ${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> importance high
+# Send as an alias (see "Sending as an alias" below):
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> from "alias@example.com"
 
 # List drafts
 ${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh drafts
 ```
 
 **Note:** `mddraft`, `mdreply`, and `update mdbody` require `pandoc` for markdown conversion. Install with `brew install pandoc` (macOS) or `apt install pandoc` (Linux).
+
+### Sending as an alias
+
+A mailbox can send as its primary address or any of its aliases (proxy addresses). List them first — never guess an alias:
+
+```bash
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh aliases
+```
+
+Set the From address on **any** draft with `update <draft-id> from`. This works on every draft — including those made by `reply`, `mdreply`, `forward`, and `followup` — so it is the way to send as an alias:
+
+```bash
+# Draft, set the alias, confirm, then send
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh draft "recipient@example.com" "Subject" "Body"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> from "alias@example.com"
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh send <draft-id>
+
+# Replies work the same way - create the reply, then set the alias
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh mdreply <message-id> "**Thanks** - see below."
+${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh update <draft-id> from "alias@example.com"
+```
+
+To default every new `draft` / `mddraft` to an alias, set `OUTLOOK_FROM_ADDRESS` (these apply only to the two create commands, not to replies — use `update from` for those):
+
+```bash
+OUTLOOK_FROM_ADDRESS="alias@example.com" ${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh draft "to@example.com" "Subject" "Body"
+```
+
+Rules and behaviour:
+
+1. **Always confirm the From line with the user before sending as an alias.** Which identity a message goes out as is as consequential as who receives it — `update from` and `send` both print the From address, so check it.
+2. **Tenant support is required.** Send-from-alias only works when the tenant has `SendFromAliasEnabled` set (`Set-OrganizationConfig -SendFromAliasEnabled $true`). Without it, Exchange silently rewrites the From back to the primary address — so verify a test send actually arrived as the alias before relying on it.
+3. **An unrecognised address warns rather than blocks**, because SendAs rights on a *shared* mailbox are real but never appear in this mailbox's alias list. If the address genuinely is not permitted, `send` fails with `ErrorSendAsDenied` and nothing is sent — a wrong alias cannot leak out.
+4. **`OUTLOOK_FROM_NAME` is usually ignored.** Exchange overrides the display name with the mailbox's own for addresses it owns; the address is what changes.
+5. **Check the alias domain's DNS before sending externally.** An alias on a domain with no DKIM signing or DMARC record may be spam-filtered by strict receivers even though the send itself succeeds.
 
 **IMPORTANT:** Always prefer `mdreply` over `reply` for professional emails - plain text replies look poorly formatted in Outlook.
 
@@ -433,10 +470,11 @@ When user wants to grab attachments from an email:
 Always draft first, confirm, then send:
 
 1. Create draft with `draft` or `mddraft` command
-2. Show user the draft content
-3. Wait for "send it" or change requests
-4. Update draft if needed
-5. Send with `send` command only after explicit approval
+2. If sending as an alias, run `aliases` to get the exact address, then `update <draft-id> from <alias>`
+3. Show user the draft content - including the From line whenever it is not the primary address
+4. Wait for "send it" or change requests
+5. Update draft if needed
+6. Send with `send` command only after explicit approval
 
 ## Workflow: Sending Email with Attachments
 
