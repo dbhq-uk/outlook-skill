@@ -420,6 +420,85 @@ recipients_to_json() {
 # quotes, non-ASCII). Without this, a query like "Q3 & Q4" is silently truncated.
 urlencode() { jq -rn --arg s "$1" '$s|@uri'; }
 
+# --- Send-as-alias ----------------------------------------------------------
+# Every address this mailbox can send as, primary first, then each alias.
+# Graph tags the primary with an uppercase "SMTP:" prefix and aliases with
+# lowercase "smtp:" - that casing IS the marker, so the selects below are
+# deliberately case-sensitive. Non-SMTP proxy entries (X500:, sip:) are
+# directory plumbing rather than mail addresses and are dropped.
+#
+# The primary falls back to .mail/.userPrincipalName per-address rather than
+# only when the whole SMTP list is empty: a mailbox can return aliases with no
+# uppercase-tagged primary, and keying the fallback off an empty list would then
+# drop the primary entirely and leave the first ALIAS wearing the primary slot.
+# Output is empty (not an error) when the lookup fails - callers distinguish
+# "no addresses" from "this address is not yours".
+sendable_addresses() {
+    api_call GET "/me?\$select=mail,userPrincipalName,proxyAddresses" | jq -r '
+        [(.proxyAddresses // [])[] | select(startswith("SMTP:")) | sub("^SMTP:"; "")] as $tagged
+        | ((($tagged | first) // .mail // .userPrincipalName // "") as $primary
+           | [$primary] + [(.proxyAddresses // [])[] | select(startswith("smtp:")) | sub("^smtp:"; "")])
+        | map(select(length > 0))
+        | reduce .[] as $a ([]; if (map(ascii_downcase) | index($a | ascii_downcase)) then . else . + [$a] end)
+        | .[]'
+}
+
+# True when $1 appears in the newline-separated address list on stdin
+# (case-insensitive). Pure: the caller fetches the list, so a check costs no
+# extra Graph round-trip and the list can be inspected before matching.
+address_in_list() {
+    local want
+    want=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    tr '[:upper:]' '[:lower:]' | grep -qxF "$want"
+}
+
+# Build a Graph `from` object. A blank name is omitted rather than sent as
+# name:"", which makes Outlook render the bare address in place of the
+# mailbox's display name.
+from_to_json() {
+    jq -n --arg addr "$1" --arg name "${2:-}" '
+        {emailAddress: ({address: $addr}
+            + (if ($name | length) > 0 then {name: $name} else {} end))}'
+}
+
+# Warn, but never block, when an address is not one of the mailbox's own. A
+# shared-mailbox SendAs right is real but never appears in this mailbox's
+# proxyAddresses, so blocking would break a legitimate case. An unauthorised
+# sender still cannot leak out - Graph rejects it with ErrorSendAsDenied at send
+# time and nothing goes out.
+#
+# An empty list means the lookup itself failed, NOT that the address is wrong;
+# saying "that is not your address" there would blame a perfectly valid alias
+# for a network blip.
+warn_if_not_sendable() {
+    local addrs
+    addrs=$(sendable_addresses)
+    if [ -z "$addrs" ]; then
+        {
+            echo "Warning: could not read this mailbox's own addresses, so '$1' has not been checked."
+            echo "  Proceeding: if the address is not permitted, the send fails with ErrorSendAsDenied."
+        } >&2
+        return 0
+    fi
+    printf '%s\n' "$addrs" | address_in_list "$1" && return 0
+    {
+        echo "Warning: '$1' is not one of this mailbox's own addresses."
+        echo "  Run 'outlook-graph-mail.sh aliases' to list the addresses it can send as."
+        echo "  Proceeding: SendAs rights on a shared mailbox do not appear in that list."
+        echo "  If the address is not permitted, the send fails with ErrorSendAsDenied."
+    } >&2
+}
+
+# The `from` fragment merged into a new draft's payload: {} normally, or
+# {from: {...}} when OUTLOOK_FROM_ADDRESS names an alias to send as. Keeping it
+# a mergeable fragment means the create paths carry no from-specific branching.
+draft_from_fragment() {
+    local addr="${OUTLOOK_FROM_ADDRESS:-}"
+    [ -n "$addr" ] || { echo '{}'; return 0; }
+    warn_if_not_sendable "$addr"
+    jq -n --argjson from "$(from_to_json "$addr" "${OUTLOOK_FROM_NAME:-}")" '{from: $from}'
+}
+
 # --- Markdown -> Outlook-safe HTML -------------------------------------------
 # Aptos is the Microsoft 365 default font since 2024; the stack falls back to
 # Segoe UI on older Outlook and Roboto / system sans elsewhere. All styles are
@@ -636,6 +715,25 @@ case "$1" in
             "Preview: \(.bodyPreview)"'
         ;;
 
+    aliases)
+        echo "Addresses account '$ACCOUNT' can send as:"
+        first=1
+        while IFS= read -r addr; do
+            if [ "$first" = 1 ]; then
+                echo "  $addr (primary)"
+                first=0
+            else
+                echo "  $addr"
+            fi
+        done < <(sendable_addresses)
+        if [ "$first" = 1 ]; then
+            echo "  (none found - could not read the mailbox's addresses)"
+            exit 1
+        fi
+        echo
+        echo "Send as one of these with: update <draft-id> from <email>"
+        ;;
+
     draft)
         to="$2"
         subject="$3"
@@ -646,55 +744,25 @@ case "$1" in
         fi
 
         echo "Creating draft..."
-        from_address="${OUTLOOK_FROM_ADDRESS:-}"
-        from_name="${OUTLOOK_FROM_NAME:-}"
-        if [ -n "$from_address" ]; then
-            payload=$(jq -n \
-                --arg to "$to" \
-                --arg subject "$subject" \
-                --arg body "${body:-}" \
-                --arg from_addr "$from_address" \
-                --arg from_name "$from_name" \
-                '{
-                    subject: $subject,
-                    body: {
-                        contentType: "Text",
-                        content: $body
-                    },
-                    from: {
+        payload=$(jq -n \
+            --arg to "$to" \
+            --arg subject "$subject" \
+            --arg body "${body:-}" \
+            --argjson from "$(draft_from_fragment)" \
+            '{
+                subject: $subject,
+                body: {
+                    contentType: "Text",
+                    content: $body
+                },
+                toRecipients: [
+                    {
                         emailAddress: {
-                            address: $from_addr,
-                            name: $from_name
+                            address: $to
                         }
-                    },
-                    toRecipients: [
-                        {
-                            emailAddress: {
-                                address: $to
-                            }
-                        }
-                    ]
-                }')
-        else
-            payload=$(jq -n \
-                --arg to "$to" \
-                --arg subject "$subject" \
-                --arg body "${body:-}" \
-                '{
-                    subject: $subject,
-                    body: {
-                        contentType: "Text",
-                        content: $body
-                    },
-                    toRecipients: [
-                        {
-                            emailAddress: {
-                                address: $to
-                            }
-                        }
-                    ]
-                }')
-        fi
+                    }
+                ]
+            } + $from')
 
         result=$(api_call POST "/me/messages" "$payload")
         draft_id=$(echo "$result" | jq -r '.id')
@@ -725,55 +793,25 @@ case "$1" in
         echo "Creating markdown draft..."
         html_body=$(md_to_html "${body:-}")
 
-        from_address="${OUTLOOK_FROM_ADDRESS:-}"
-        from_name="${OUTLOOK_FROM_NAME:-}"
-        if [ -n "$from_address" ]; then
-            payload=$(jq -n \
-                --arg to "$to" \
-                --arg subject "$subject" \
-                --arg body "$html_body" \
-                --arg from_addr "$from_address" \
-                --arg from_name "$from_name" \
-                '{
-                    subject: $subject,
-                    body: {
-                        contentType: "HTML",
-                        content: $body
-                    },
-                    from: {
+        payload=$(jq -n \
+            --arg to "$to" \
+            --arg subject "$subject" \
+            --arg body "$html_body" \
+            --argjson from "$(draft_from_fragment)" \
+            '{
+                subject: $subject,
+                body: {
+                    contentType: "HTML",
+                    content: $body
+                },
+                toRecipients: [
+                    {
                         emailAddress: {
-                            address: $from_addr,
-                            name: $from_name
+                            address: $to
                         }
-                    },
-                    toRecipients: [
-                        {
-                            emailAddress: {
-                                address: $to
-                            }
-                        }
-                    ]
-                }')
-        else
-            payload=$(jq -n \
-                --arg to "$to" \
-                --arg subject "$subject" \
-                --arg body "$html_body" \
-                '{
-                    subject: $subject,
-                    body: {
-                        contentType: "HTML",
-                        content: $body
-                    },
-                    toRecipients: [
-                        {
-                            emailAddress: {
-                                address: $to
-                            }
-                        }
-                    ]
-                }')
-        fi
+                    }
+                ]
+            } + $from')
 
         result=$(api_call POST "/me/messages" "$payload")
         draft_id=$(echo "$result" | jq -r '.id')
@@ -841,6 +879,7 @@ case "$1" in
             echo "  to <emails>        Set To recipient(s) - comma/semicolon-separated; replaces the To line"
             echo "  cc <emails>        Add CC recipient(s) - comma/semicolon-separated; dedups; empty string clears CC"
             echo "  bcc <emails>       Add BCC recipient(s) - comma/semicolon-separated; dedups; empty string clears BCC"
+            echo "  from <email>       Send as an alias - must be an address this mailbox may send as (see: aliases)"
             echo "  importance <level> Set message importance: low, normal, or high"
             exit 1
         fi
@@ -948,6 +987,21 @@ case "$1" in
                         | {bccRecipients: ($ex + ($new | map(select((.emailAddress.address // "" | ascii_downcase) as $a | ($have | index($a)) | not))))}')
                 fi
                 ;;
+            from)
+                # Send as an alias. Works on ANY draft - including those made by
+                # reply/mdreply/forward/followup - because they all leave a draft
+                # behind to PATCH. The address must be one the mailbox may send
+                # as; warn_if_not_sendable explains why an unknown one is a
+                # warning rather than an error.
+                if [ -z "$value" ]; then
+                    echo "Error: Email address required"
+                    echo "Run 'outlook-graph-mail.sh aliases' to list sendable addresses"
+                    exit 1
+                fi
+                warn_if_not_sendable "$value"
+                echo "Setting From address to $value..."
+                payload=$(jq -n --argjson from "$(from_to_json "$value" "${OUTLOOK_FROM_NAME:-}")" '{from: $from}')
+                ;;
             importance)
                 lvl=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
                 case "$lvl" in
@@ -959,7 +1013,7 @@ case "$1" in
                 ;;
             *)
                 echo "Error: Unknown field '$field'"
-                echo "Valid fields: subject, body, mdbody, to, cc, bcc, importance"
+                echo "Valid fields: subject, body, mdbody, to, cc, bcc, from, importance"
                 exit 1
                 ;;
         esac
@@ -974,6 +1028,7 @@ case "$1" in
 
         echo "Draft updated!"
         echo "$result" | jq -r '
+            (if (.from.emailAddress.address // "") != "" then "From:    \(.from.emailAddress.address)" else empty end),
             "To:      \((.toRecipients // []) | map(.emailAddress.address) | join(", ") | (if . == "" then "none" else . end))",
             (if ((.ccRecipients // []) | length) > 0 then "Cc:      \(.ccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
             (if ((.bccRecipients // []) | length) > 0 then "Bcc:     \(.bccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
@@ -2059,9 +2114,10 @@ ${existing_body}"
         echo "  mdreply <id> <body>            Create reply draft with markdown formatting"
         echo "  forward <id> <to> [comment]    Create forward draft (markdown comment optional)"
         echo "  followup <sent-id> [body]      Create chaser reply to your sent email"
-        echo "  update <draft-id> <field> <value>  Update draft (subject/body/mdbody/to/cc/bcc/importance)"
+        echo "  update <draft-id> <field> <value>  Update draft (subject/body/mdbody/to/cc/bcc/from/importance)"
         echo "  send <draft-id>                Send draft"
         echo "  drafts [count]                 List drafts"
+        echo "  aliases                        List addresses this mailbox can send as"
         echo
         echo "Attachments:"
         echo "  attachments <id>           List attachments on message"

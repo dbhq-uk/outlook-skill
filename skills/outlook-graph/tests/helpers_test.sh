@@ -38,6 +38,10 @@ eval "$(extract_fn _find_folder_by_name)"
 eval "$(extract_fn _resolve_folder_path)"
 eval "$(extract_fn resolve_folder_id)"
 eval "$(extract_fn recipients_to_json)"
+eval "$(extract_fn sendable_addresses)"
+eval "$(extract_fn address_in_list)"
+eval "$(extract_fn warn_if_not_sendable)"
+eval "$(extract_fn from_to_json)"
 eval "$(extract_fn md_to_html)"
 eval "$(extract_cal_fn attendees_to_json)"
 eval "$(extract_cal_fn resolve_event_id)"
@@ -262,6 +266,70 @@ unset OUTLOOK_TOKEN_RETRIED
 retry_out=$(api_call_file POST /x "$body_file")
 eq "api_call_file auth-retry re-reads body file" "big.pdf" "$(printf '%s' "$retry_out" | jq -r '.name')"
 eq "api_call_file auth-retry uses refreshed token" "newtok" "$(printf '%s' "$retry_out" | jq -r '.token')"
+
+########################################
+# Send-as-alias: sendable_addresses / is_sendable_address / from_to_json.
+# Graph marks the primary address with an uppercase "SMTP:" prefix and aliases
+# with lowercase "smtp:". Getting that casing rule wrong would either hide every
+# alias or mistake an alias for the primary, so it is pinned here.
+########################################
+api_call() {
+    echo '{"mail":"dan@example.com","userPrincipalName":"dan@example.onmicrosoft.com","proxyAddresses":["smtp:alias1@example.com","SMTP:dan@example.com","X500:/o=ExchangeLabs/cn=Recipients/cn=abc","sip:dan@example.com","smtp:alias2@other.co.uk"]}'
+}
+eq "sendable_addresses primary first, then aliases" \
+   "dan@example.com,alias1@example.com,alias2@other.co.uk" \
+   "$(sendable_addresses | paste -sd, -)"
+eq "sendable_addresses drops X500/sip entries" "3" "$(sendable_addresses | wc -l)"
+eq "address_in_list matches alias" "0" \
+   "$(sendable_addresses | address_in_list 'alias2@other.co.uk'; echo $?)"
+eq "address_in_list is case-insensitive" "0" \
+   "$(sendable_addresses | address_in_list 'Alias1@EXAMPLE.com'; echo $?)"
+eq "address_in_list rejects unknown" "1" \
+   "$(sendable_addresses | address_in_list 'nope@example.com'; echo $?)"
+# grep -F, not a regex: a '.' in a domain must not match any character, or
+# 'aliasX@other.co.uk' would masquerade as a known address.
+eq "address_in_list treats input as literal, not regex" "1" \
+   "$(sendable_addresses | address_in_list 'aliasX@other.co.uk'; echo $?)"
+eq "address_in_list rejects a substring of a known address" "1" \
+   "$(sendable_addresses | address_in_list 'alias1@example.co'; echo $?)"
+
+# A mailbox with no proxyAddresses at all (some tenants) must still report the
+# one address it can send as, rather than an empty list.
+api_call() { echo '{"mail":"solo@example.com","userPrincipalName":"solo@example.onmicrosoft.com"}'; }
+eq "sendable_addresses falls back to .mail" "solo@example.com" "$(sendable_addresses | paste -sd, -)"
+api_call() { echo '{"userPrincipalName":"upn-only@example.com"}'; }
+eq "sendable_addresses falls back to UPN" "upn-only@example.com" "$(sendable_addresses | paste -sd, -)"
+
+# Aliases but NO uppercase-tagged primary. The primary must still appear, and
+# must lead - otherwise `aliases` crowns the first ALIAS "(primary)" and
+# `update from <primary>` warns that the real primary is not your address.
+api_call() { echo '{"mail":"real@example.com","proxyAddresses":["smtp:alias@example.com"]}'; }
+eq "sendable_addresses keeps primary when no SMTP: tag" \
+   "real@example.com,alias@example.com" "$(sendable_addresses | paste -sd, -)"
+
+# The primary is routinely repeated as a lowercase smtp: entry; listing it twice
+# would render it twice in `aliases`.
+api_call() { echo '{"mail":"dan@example.com","proxyAddresses":["SMTP:dan@example.com","smtp:DAN@example.com","smtp:alias@example.com"]}'; }
+eq "sendable_addresses dedups primary case-insensitively" \
+   "dan@example.com,alias@example.com" "$(sendable_addresses | paste -sd, -)"
+
+# A failed lookup must yield an empty list, so warn_if_not_sendable can say
+# "could not check" rather than blaming a valid alias for a network blip.
+api_call() { echo '{"error":{"code":"NetworkError","message":"boom"}}'; }
+eq "sendable_addresses empty on Graph error" "" "$(sendable_addresses)"
+eq "warn_if_not_sendable says 'not checked' on lookup failure" "1" \
+   "$(warn_if_not_sendable 'real@example.com' 2>&1 >/dev/null | grep -c 'has not been checked')"
+eq "warn_if_not_sendable does NOT blame the address on lookup failure" "0" \
+   "$(warn_if_not_sendable 'real@example.com' 2>&1 >/dev/null | grep -c 'is not one of')"
+
+# Sending name:"" makes Outlook render the bare address instead of the mailbox
+# display name, so a blank name must be omitted from the payload entirely.
+eq "from_to_json omits blank name" '{"emailAddress":{"address":"a@x.com"}}' \
+   "$(from_to_json 'a@x.com' | jq -c .)"
+eq "from_to_json omits name when unset" '{"emailAddress":{"address":"a@x.com"}}' \
+   "$(from_to_json 'a@x.com' '' | jq -c .)"
+eq "from_to_json includes name when given" '{"emailAddress":{"address":"a@x.com","name":"Dan G"}}' \
+   "$(from_to_json 'a@x.com' 'Dan G' | jq -c .)"
 
 rm -f "$body_file" /tmp/outlook_test_last_url /tmp/outlook_test_calls
 echo "-----------------------------"
