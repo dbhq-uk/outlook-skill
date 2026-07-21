@@ -517,7 +517,7 @@ require_pandoc() {
 # $2 = line-height (default 1.5; replies use 1.6).
 md_to_html() {
     local md="$1" lh="${2:-1.5}" html
-    html=$(printf '%s\n' "$md" | pandoc -f markdown -t html \
+    html=$(printf '%s\n' "$md" | pandoc -f markdown+autolink_bare_uris -t html \
         | sed 's/<p>/<p style="margin: 0 0 14px 0;">/g')
     printf '<div style="font-family: %s; font-size: 14px; line-height: %s; color: #333;">\n%s\n</div>' \
         "$FONT_STACK" "$lh" "$html"
