@@ -27,14 +27,14 @@ between your machine and Microsoft directly.
 
 ### Credentials
 
-Tokens live under `~/.outlook-graph/<account>/`, with permissions set explicitly
+Tokens live under `~/.dbhq/outlook-graph/<account>/`, with permissions set explicitly
 rather than left to the umask:
 
 ```
-~/.outlook-graph/                            700   base directory
-~/.outlook-graph/<account>/                  700   per-account directory
-~/.outlook-graph/<account>/config.json       600   app registration details
-~/.outlook-graph/<account>/credentials.json  600   access and refresh tokens
+~/.dbhq/outlook-graph/                            700   base directory
+~/.dbhq/outlook-graph/<account>/                  700   per-account directory
+~/.dbhq/outlook-graph/<account>/config.json       600   app registration details
+~/.dbhq/outlook-graph/<account>/credentials.json  600   access and refresh tokens
 ```
 
 The credentials file is rewritten at `600` on every token refresh, not only at
@@ -45,7 +45,7 @@ Multiple accounts are isolated in separate directories and selected with
 
 **Revoking access:** these are OAuth tokens against your own Azure app
 registration. Revoke sessions in Entra ID (Azure AD) to cut access immediately.
-Deleting `~/.outlook-graph` removes the local copy but does not revoke the
+Deleting `~/.dbhq/outlook-graph` removes the local copy but does not revoke the
 grant - do both.
 
 ### Scope of access
@@ -59,14 +59,14 @@ delegated over application permissions.
 ### On disk
 
 - Installs into `~/.claude/skills/outlook-graph` or `~/.codex`
-- Reads and writes `~/.outlook-graph/` only
+- Reads and writes `~/.dbhq/outlook-graph/` only
 - `outlook-to-md` processes PST files **entirely locally** - a PST is never
   uploaded anywhere
 
 ### On the "sensitive file access" findings
 
 Automated scanners flag the lines in `SKILL.md` that name
-`~/.outlook-graph/<account>/` as "access to home directory dotfiles". Those are
+`~/.dbhq/outlook-graph/<account>/` as "access to home directory dotfiles". Those are
 sentences of documentation, not code - they describe where credentials live so
 you can find, inspect and delete them.
 
