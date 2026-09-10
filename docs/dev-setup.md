@@ -31,7 +31,7 @@ Complete the setup the installer offers, or run it directly:
 ~/.claude/skills/outlook-graph/scripts/outlook-graph-setup.sh
 ```
 
-It registers (or reuses) an Azure app and signs you in via OAuth. Credentials are stored under `~/.outlook-graph/<account>/`, never in the repo, and tokens refresh automatically. If you've already set this up on another machine, you can copy `~/.outlook-graph/` across instead of re-authenticating.
+It registers (or reuses) an Azure app and signs you in via OAuth. Credentials are stored under `~/.dbhq/outlook-graph/<account>/`, never in the repo, and tokens refresh automatically. If you've already set this up on another machine, you can copy `~/.dbhq/outlook-graph/` across instead of re-authenticating.
 
 ## 4. Verify
 

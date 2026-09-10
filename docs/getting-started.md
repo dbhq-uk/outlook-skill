@@ -46,7 +46,7 @@ consent to five delegated permissions: `Mail.ReadWrite`, `Mail.Send`, `Calendars
 lets it read anyone else's mailbox, and nothing lets it act while you are not signed in
 beyond the refresh token's life.
 
-Credentials land in `~/.outlook-graph/default/`, mode `600`, and never go anywhere else.
+Credentials land in `~/.dbhq/outlook-graph/default/`, mode `600`, and never go anywhere else.
 
 Check it worked:
 

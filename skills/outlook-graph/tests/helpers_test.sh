@@ -487,12 +487,12 @@ CLI_MASTERCATS="$CLI_TMP/mastercats.json"
 CLI_MASTERCATS_POST="$CLI_TMP/mastercats_post.json"
 CLI_MASTERCATS_PATCH="$CLI_TMP/mastercats_patch.json"
 CLI_CURRENTCATS="$CLI_TMP/currentcats.json"
-mkdir -p "$CLI_HOME/.outlook-graph/default"
+mkdir -p "$CLI_HOME/.dbhq/outlook-graph/default"
 printf '%s' '{"client_id":"test-client","client_secret":"test-secret"}' \
-    > "$CLI_HOME/.outlook-graph/default/config.json"
+    > "$CLI_HOME/.dbhq/outlook-graph/default/config.json"
 printf '%s' '{"access_token":"test-token","refresh_token":"test-refresh","expires_at":9999999999}' \
-    > "$CLI_HOME/.outlook-graph/default/credentials.json"
-chmod 600 "$CLI_HOME/.outlook-graph/default/credentials.json"
+    > "$CLI_HOME/.dbhq/outlook-graph/default/credentials.json"
+chmod 600 "$CLI_HOME/.dbhq/outlook-graph/default/credentials.json"
 export CLI_LOG CLI_MASTERCATS CLI_MASTERCATS_POST CLI_MASTERCATS_PATCH CLI_CURRENTCATS
 
 # >100 chars so resolve_message_id's "looks like a full ID" short-circuit

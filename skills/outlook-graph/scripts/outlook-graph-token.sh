@@ -3,7 +3,15 @@
 
 set -e
 
-BASE_DIR="$HOME/.outlook-graph"
+BASE_DIR="$HOME/.dbhq/outlook-graph"
+
+# One-time migration: settings used to live at ~/.outlook-graph
+if [ ! -e "$BASE_DIR" ] && [ -d "$HOME/.outlook-graph" ]; then
+    mkdir -p "$HOME/.dbhq"
+    chmod 700 "$HOME/.dbhq"
+    mv "$HOME/.outlook-graph" "$BASE_DIR"
+    chmod 700 "$BASE_DIR"
+fi
 
 # Account resolution: --account/-a flag wins, else OUTLOOK_ACCOUNT env, else "default"
 ACCOUNT="${OUTLOOK_ACCOUNT:-default}"

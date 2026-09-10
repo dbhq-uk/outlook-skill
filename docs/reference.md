@@ -175,7 +175,7 @@ setup.sh --account work       # add another, reusing the app registration if fou
 ```
 
 Registers (or reuses) an Azure app, runs the OAuth sign-in, and writes
-`~/.outlook-graph/<account>/`. The manual equivalent is
+`~/.dbhq/outlook-graph/<account>/`. The manual equivalent is
 [`references/setup.md`](../skills/outlook-graph/references/setup.md).
 
 Delegated permissions requested, and the whole of what the pack can do:
@@ -255,11 +255,11 @@ thousand messages takes five to fifteen minutes.
 
 | Path | Contents |
 |---|---|
-| `~/.outlook-graph/<account>/config.json` | Client ID, secret, tenant, redirect URI, scopes (`600`) |
-| `~/.outlook-graph/<account>/credentials.json` | Access and refresh tokens (`600`) |
-| `~/.outlook-graph/<account>/id_cache.json` | Short ID to full Graph ID |
+| `~/.dbhq/outlook-graph/<account>/config.json` | Client ID, secret, tenant, redirect URI, scopes (`600`) |
+| `~/.dbhq/outlook-graph/<account>/credentials.json` | Access and refresh tokens (`600`) |
+| `~/.dbhq/outlook-graph/<account>/id_cache.json` | Short ID to full Graph ID |
 
-A pre-multi-account install with flat `~/.outlook-graph/*.json` files is migrated into
+A pre-multi-account install with flat `~/.dbhq/outlook-graph/*.json` files is migrated into
 `default/` on the first run of any script.
 
 ## Requirements

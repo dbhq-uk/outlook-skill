@@ -28,7 +28,7 @@ that is not a file in the repository.
 Authentication is a **delegated** OAuth flow, not application permissions. The distinction
 matters: a delegated token can only ever do what the signed-in person can do in their own
 mailbox. There is no tenant-wide grant, no admin consent, and nothing here can reach another
-person's mail. Tokens live under `~/.outlook-graph/<account>/` at mode `600` and refresh
+person's mail. Tokens live under `~/.dbhq/outlook-graph/<account>/` at mode `600` and refresh
 themselves when a command needs it.
 
 Five scopes are requested and no more: `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`,

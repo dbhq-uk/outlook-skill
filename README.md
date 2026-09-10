@@ -114,7 +114,7 @@ cd outlook-graph-skill
 ```
 
 First run launches `outlook-graph-setup.sh`, which registers an Azure app and signs you in.
-Credentials are stored per account under `~/.outlook-graph/<account>/`, never leave your
+Credentials are stored per account under `~/.dbhq/outlook-graph/<account>/`, never leave your
 machine, and refresh themselves. The whole install-to-first-email path is
 [docs/getting-started.md](docs/getting-started.md).
 
@@ -148,7 +148,7 @@ Hacking on it, or running from source with live edits: [docs/dev-setup.md](docs/
 
 ## Credentials and privacy
 
-No secrets live in this repository. Your tokens are stored locally under `~/.outlook-graph/`
+No secrets live in this repository. Your tokens are stored locally under `~/.dbhq/outlook-graph/`
 and used only to talk to Microsoft Graph directly from your machine.
 
 ## License

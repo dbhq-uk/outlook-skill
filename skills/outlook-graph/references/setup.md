@@ -52,19 +52,19 @@ Note: Admin consent is NOT required for delegated permissions with personal/org 
 ## Step 5: Create Config Files
 
 > **Multi-account note:** This guide configures the `default` account. Credentials live
-> under `~/.outlook-graph/<account>/`. The flat `~/.outlook-graph/*.json` files below are auto-migrated
-> into `~/.outlook-graph/default/` the first time any script runs, so you can write them flat here.
+> under `~/.dbhq/outlook-graph/<account>/`. The flat `~/.dbhq/outlook-graph/*.json` files below are auto-migrated
+> into `~/.dbhq/outlook-graph/default/` the first time any script runs, so you can write them flat here.
 > To set up an additional mailbox, prefer `outlook-graph-setup.sh --account <name>`, which reuses
 > this app registration.
 
 Create the config directory:
 
 ```bash
-mkdir -p ~/.outlook-graph
-chmod 700 ~/.outlook-graph
+mkdir -p ~/.dbhq/outlook-graph
+chmod 700 ~/.dbhq ~/.dbhq/outlook-graph
 ```
 
-Create `~/.outlook-graph/config.json`:
+Create `~/.dbhq/outlook-graph/config.json`:
 
 ```json
 {
@@ -79,7 +79,7 @@ Create `~/.outlook-graph/config.json`:
 Set permissions:
 
 ```bash
-chmod 600 ~/.outlook-graph/config.json
+chmod 600 ~/.dbhq/outlook-graph/config.json
 ```
 
 ## Step 6: Get Authorization Code
@@ -110,9 +110,9 @@ curl -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
   -d "redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient" \
   -d "grant_type=authorization_code" \
   -d "scope=offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read" \
-  > ~/.outlook-graph/credentials.json
+  > ~/.dbhq/outlook-graph/credentials.json
 
-chmod 600 ~/.outlook-graph/credentials.json
+chmod 600 ~/.dbhq/outlook-graph/credentials.json
 ```
 
 ## Step 8: Verify Setup
@@ -154,6 +154,6 @@ Tokens are automatically refreshed. If you see this error, it means the refresh 
 
 | File | Purpose |
 |------|---------|
-| `~/.outlook-graph/config.json` | Azure app credentials |
-| `~/.outlook-graph/credentials.json` | OAuth tokens |
+| `~/.dbhq/outlook-graph/config.json` | Azure app credentials |
+| `~/.dbhq/outlook-graph/credentials.json` | OAuth tokens |
 | `${CLAUDE_SKILL_DIR}/` | Skill and scripts |

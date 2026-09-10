@@ -11,7 +11,15 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-BASE_DIR="$HOME/.outlook-graph"
+BASE_DIR="$HOME/.dbhq/outlook-graph"
+
+# One-time migration: settings used to live at ~/.outlook-graph
+if [ ! -e "$BASE_DIR" ] && [ -d "$HOME/.outlook-graph" ]; then
+    mkdir -p "$HOME/.dbhq"
+    chmod 700 "$HOME/.dbhq"
+    mv "$HOME/.outlook-graph" "$BASE_DIR"
+    chmod 700 "$BASE_DIR"
+fi
 
 # Account resolution: --account/-a flag wins, else OUTLOOK_ACCOUNT env, else "default"
 ACCOUNT="${OUTLOOK_ACCOUNT:-default}"
@@ -200,7 +208,7 @@ fi
 
 # Step 5: Save config
 mkdir -p "$CONFIG_DIR"
-chmod 700 "$BASE_DIR" "$CONFIG_DIR"
+chmod 700 "$HOME/.dbhq" "$BASE_DIR" "$CONFIG_DIR"
 echo -e "${BLUE}Step 5/7: Saving Configuration${NC}"
 
 cat > "$CONFIG_FILE" << EOF

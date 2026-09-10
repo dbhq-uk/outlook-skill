@@ -64,7 +64,7 @@ All of this is implemented in ONE place: the `md_to_html` helper (and its `FONT_
 
 ## Multiple accounts
 
-Each account stores credentials under `~/.outlook-graph/<account>/`. The active account is selected by (in order of precedence): `--account <name>` / `-a <name>` flag, the `OUTLOOK_ACCOUNT` env var, then `default`.
+Each account stores credentials under `~/.dbhq/outlook-graph/<account>/`. The active account is selected by (in order of precedence): `--account <name>` / `-a <name>` flag, the `OUTLOOK_ACCOUNT` env var, then `default`.
 
 ```bash
 # Default account
@@ -83,13 +83,13 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-graph-token.sh list
 ${CLAUDE_SKILL_DIR}/scripts/outlook-graph-setup.sh --account work
 ```
 
-An existing single-account install at `~/.outlook-graph/{config,credentials,id_cache}.json` is auto-migrated to `~/.outlook-graph/default/` on the first run of any script.
+An existing single-account install at `~/.dbhq/outlook-graph/{config,credentials,id_cache}.json` is auto-migrated to `~/.dbhq/outlook-graph/default/` on the first run of any script. Settings from before the `~/.dbhq` move (at `~/.outlook-graph`) are likewise moved to `~/.dbhq/outlook-graph` on first run.
 
 Calendar timezone is auto-detected from the system. Override with `OUTLOOK_TZ`, e.g. `OUTLOOK_TZ=America/New_York ${CLAUDE_SKILL_DIR}/scripts/outlook-graph-calendar.sh today`.
 
 ## Prerequisites
 
-- Credentials configured in `~/.outlook-graph/<account>/` (run setup if not done)
+- Credentials configured in `~/.dbhq/outlook-graph/<account>/` (run setup if not done)
 - Azure CLI, jq, curl installed
 
 **Note:** Tokens are automatically refreshed when needed. No manual intervention required.

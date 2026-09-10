@@ -3,7 +3,15 @@
 
 set -e
 
-BASE_DIR="$HOME/.outlook-graph"
+BASE_DIR="$HOME/.dbhq/outlook-graph"
+
+# One-time migration: settings used to live at ~/.outlook-graph
+if [ ! -e "$BASE_DIR" ] && [ -d "$HOME/.outlook-graph" ]; then
+    mkdir -p "$HOME/.dbhq"
+    chmod 700 "$HOME/.dbhq"
+    mv "$HOME/.outlook-graph" "$BASE_DIR"
+    chmod 700 "$BASE_DIR"
+fi
 
 # Account resolution: --account/-a flag wins, else OUTLOOK_ACCOUNT env, else "default"
 ACCOUNT="${OUTLOOK_ACCOUNT:-default}"
@@ -183,7 +191,7 @@ die_on_error() {
 # Called after every listing command so that resolve_message_id can find
 # messages from any folder (inbox, subfolders, drafts, sent) without
 # expensive API cascading.
-# Written atomically: several agents/shells can share one ~/.outlook-graph/<account>/
+# Written atomically: several agents/shells can share one ~/.dbhq/outlook-graph/<account>/
 # and a plain `>` redirect lets a concurrent writer be observed mid-write, so a
 # reader can see a truncated (invalid) cache. Write to a temp file in the same
 # directory, then rename — rename is atomic, so a reader sees either the old

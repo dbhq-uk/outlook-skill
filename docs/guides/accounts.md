@@ -4,7 +4,7 @@ Running more than one mailbox, and what to do when authentication stops working.
 
 ## More than one mailbox
 
-Each account keeps its own credentials under `~/.outlook-graph/<account>/`. Add one:
+Each account keeps its own credentials under `~/.dbhq/outlook-graph/<account>/`. Add one:
 
 ```bash
 ~/.claude/skills/outlook-graph/scripts/outlook-graph-setup.sh --account work
@@ -26,8 +26,8 @@ OUTLOOK_ACCOUNT=work mail.sh inbox
 ```
 
 An install predating multi-account support keeps its files flat at
-`~/.outlook-graph/{config,credentials,id_cache}.json`. The first run of any script moves them
-into `~/.outlook-graph/default/`. Nothing to do, but do not be surprised.
+`~/.dbhq/outlook-graph/{config,credentials,id_cache}.json`. The first run of any script moves them
+into `~/.dbhq/outlook-graph/default/`. Nothing to do, but do not be surprised.
 
 ## Checking the connection
 
@@ -53,7 +53,7 @@ curl -s -H "Authorization: Bearer $T" \
 ## When it stops working
 
 **"Account 'x' not configured"** - there is no `credentials.json` under
-`~/.outlook-graph/x/`. Run setup with `--account x`, or check you have not typo'd the name.
+`~/.dbhq/outlook-graph/x/`. Run setup with `--account x`, or check you have not typo'd the name.
 
 **Token expired, and refresh also failed.** Refresh tokens last around 90 days of inactivity.
 Past that, re-authenticate: `outlook-graph-setup.sh`, or steps 6 and 7 of
@@ -61,7 +61,7 @@ Past that, re-authenticate: `outlook-graph-setup.sh`, or steps 6 and 7 of
 
 **"Invalid client secret".** Client secrets are visible once, at creation. If yours is lost or
 expired, make a new one in the Azure portal under *Certificates & secrets* and update
-`client_secret` in `~/.outlook-graph/<account>/config.json`.
+`client_secret` in `~/.dbhq/outlook-graph/<account>/config.json`.
 
 **"AADSTS50011: Reply URL does not match".** The redirect URI in the app registration must be
 exactly `https://login.microsoftonline.com/common/oauth2/nativeclient`.
@@ -84,9 +84,9 @@ message is now.
 
 | Path | Contents |
 |---|---|
-| `~/.outlook-graph/<account>/config.json` | Azure app client ID and secret, tenant, scopes |
-| `~/.outlook-graph/<account>/credentials.json` | OAuth access and refresh tokens |
-| `~/.outlook-graph/<account>/id_cache.json` | Short ID to full Graph ID mapping |
+| `~/.dbhq/outlook-graph/<account>/config.json` | Azure app client ID and secret, tenant, scopes |
+| `~/.dbhq/outlook-graph/<account>/credentials.json` | OAuth access and refresh tokens |
+| `~/.dbhq/outlook-graph/<account>/id_cache.json` | Short ID to full Graph ID mapping |
 
 The account directory is `700` and both credential files `600`, in your home directory and
 nowhere else. Nothing is sent anywhere except

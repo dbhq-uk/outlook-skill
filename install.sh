@@ -93,7 +93,9 @@ echo
 SETUP="$SKILLS_ROOT/outlook-graph/scripts/outlook-graph-setup.sh"
 if [ ! -e "$SKILLS_ROOT/outlook-graph" ]; then
   echo "outlook-graph was not installed - skipping credential setup."
-elif [ -f "$HOME/.outlook-graph/default/credentials.json" ] || [ -f "$HOME/.outlook-graph/credentials.json" ]; then
+elif [ -f "$HOME/.dbhq/outlook-graph/default/credentials.json" ] \
+  || [ -f "$HOME/.outlook-graph/default/credentials.json" ] \
+  || [ -f "$HOME/.outlook-graph/credentials.json" ]; then
   echo "Existing Outlook credentials found. Re-run setup any time with:"
   echo "  $SETUP"
 else
