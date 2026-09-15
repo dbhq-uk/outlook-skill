@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="Outlook skill for Claude Code, by DBHQ" width="420">
+<img src="assets/logo.svg" alt="outlook-graph skill for Claude Code, by DBHQ" width="420">
 
-# Outlook for Claude Code
+# outlook-graph
 
 **Your Microsoft 365 mail, calendar and archives in the terminal - driven by Claude Code or Codex**
 
