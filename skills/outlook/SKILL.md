@@ -83,7 +83,7 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-token.sh list
 ${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh --account work
 ```
 
-An existing single-account install at `~/.dbhq/outlook/{config,credentials,id_cache}.json` is auto-migrated to `~/.dbhq/outlook/default/` on the first run of any script. Settings from before the `~/.dbhq` move (at `~/.outlook`) are likewise moved to `~/.dbhq/outlook` on first run.
+An existing single-account install at `~/.dbhq/outlook/{config,credentials,id_cache}.json` is auto-migrated to `~/.dbhq/outlook/default/` on the first run of any script. So are the two earlier homes: `~/.dbhq/outlook-graph`, from before the skill was renamed on 17 Sep 2026, and `~/.outlook-graph`, from before the `~/.dbhq` move. An install still at the oldest path makes both hops.
 
 Calendar timezone is auto-detected from the system. Override with `OUTLOOK_TZ`, e.g. `OUTLOOK_TZ=America/New_York ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh today`.
 

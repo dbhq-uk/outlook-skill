@@ -5,11 +5,28 @@ set -e
 
 BASE_DIR="$HOME/.dbhq/outlook"
 
-# One-time migration: settings used to live at ~/.outlook
-if [ ! -e "$BASE_DIR" ] && [ -d "$HOME/.outlook" ]; then
+# One-time migrations, oldest first. Each is guarded on the NEW directory not
+# existing, so an install that has already moved is left alone and a second run
+# does nothing. The skill has had three homes:
+#
+#   ~/.outlook-graph            before the ~/.dbhq rule (10 Sep 2026)
+#   ~/.dbhq/outlook-graph       before the rename (17 Sep 2026)
+#   ~/.dbhq/outlook             now
+#
+# EVERY ENTRY SCRIPT CARRIES THIS, and that is the point rather than
+# duplication for its own sake: whichever one a user or an agent runs first has
+# to be the one that moves the settings. A migration in only one script is a
+# migration that has not run.
+if [ ! -e "$HOME/.dbhq/outlook-graph" ] && [ ! -e "$BASE_DIR" ] \
+   && [ -d "$HOME/.outlook-graph" ]; then
     mkdir -p "$HOME/.dbhq"
     chmod 700 "$HOME/.dbhq"
-    mv "$HOME/.outlook" "$BASE_DIR"
+    mv "$HOME/.outlook-graph" "$HOME/.dbhq/outlook-graph"
+    chmod 700 "$HOME/.dbhq/outlook-graph"
+fi
+
+if [ ! -e "$BASE_DIR" ] && [ -d "$HOME/.dbhq/outlook-graph" ]; then
+    mv "$HOME/.dbhq/outlook-graph" "$BASE_DIR"
     chmod 700 "$BASE_DIR"
 fi
 
