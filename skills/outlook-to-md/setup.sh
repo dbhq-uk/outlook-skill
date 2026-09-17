@@ -60,7 +60,14 @@ fi
 echo "Installing dependencies..."
 # setuptools and wheel first: libratom's transitive numpy==1.23.5 arrives as an
 # sdist and needs a build backend present to configure.
-"$VENV/bin/pip" install --upgrade pip setuptools wheel -q
+#
+# SETUPTOOLS IS PINNED BELOW 81 AND MUST STAY THERE. 81 removed pkg_resources,
+# and libratom's spacy dependency imports it at module level - so an unpinned
+# --upgrade installs 82, and every ratom call fails with ModuleNotFoundError:
+# No module named 'pkg_resources'. That is not a build-time warning, it is the
+# skill not working at all, and it broke this install silently (17 Sep 2026).
+"$VENV/bin/pip" install --upgrade pip wheel -q
+"$VENV/bin/pip" install --upgrade "setuptools<81" -q
 
 if [ "$LIBRATOM_OK" = 1 ]; then
     "$VENV/bin/pip" install -r "$SKILL_DIR/requirements.txt" -q
