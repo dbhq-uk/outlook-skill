@@ -40,7 +40,7 @@ echo
 for stale in pst-to-markdown outlook-graph; do
   if [ -e "$SKILLS_ROOT/$stale" ] || [ -L "$SKILLS_ROOT/$stale" ]; then
     echo "Removing renamed skill '$stale'"
-    rm -rf "$SKILLS_ROOT/$stale"
+    rm -rf "${SKILLS_ROOT:?}/$stale"
   fi
 done
 
