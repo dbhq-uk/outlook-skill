@@ -4,12 +4,12 @@ Every command, argument and environment variable in both skills. For how to use 
 together, see the [guides](README.md#doing).
 
 Script paths are written here as `mail.sh`, `calendar.sh`, `token.sh` and `setup.sh`. In full
-they are `~/.claude/skills/outlook-graph/scripts/outlook-graph-<name>.sh` for a local install,
-and `${CLAUDE_SKILL_DIR}/scripts/outlook-graph-<name>.sh` inside the skill itself.
+they are `~/.claude/skills/outlook/scripts/outlook-<name>.sh` for a local install,
+and `${CLAUDE_SKILL_DIR}/scripts/outlook-<name>.sh` inside the skill itself.
 
 ## Conventions
 
-**Account selection.** Every `outlook-graph` script takes `--account <name>` or `-a <name>`
+**Account selection.** Every `outlook` script takes `--account <name>` or `-a <name>`
 *before* the command, falling back to `$OUTLOOK_ACCOUNT` and then `default`.
 
 **Message IDs.** Listings print a 20-character short ID (the tail of the full Graph ID). Every
@@ -175,8 +175,8 @@ setup.sh --account work       # add another, reusing the app registration if fou
 ```
 
 Registers (or reuses) an Azure app, runs the OAuth sign-in, and writes
-`~/.dbhq/outlook-graph/<account>/`. The manual equivalent is
-[`references/setup.md`](../skills/outlook-graph/references/setup.md).
+`~/.dbhq/outlook/<account>/`. The manual equivalent is
+[`references/setup.md`](../skills/outlook/references/setup.md).
 
 Delegated permissions requested, and the whole of what the pack can do:
 `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`, `User.Read`, `offline_access`.
@@ -255,19 +255,19 @@ thousand messages takes five to fifteen minutes.
 
 | Path | Contents |
 |---|---|
-| `~/.dbhq/outlook-graph/<account>/config.json` | Client ID, secret, tenant, redirect URI, scopes (`600`) |
-| `~/.dbhq/outlook-graph/<account>/credentials.json` | Access and refresh tokens (`600`) |
-| `~/.dbhq/outlook-graph/<account>/id_cache.json` | Short ID to full Graph ID |
+| `~/.dbhq/outlook/<account>/config.json` | Client ID, secret, tenant, redirect URI, scopes (`600`) |
+| `~/.dbhq/outlook/<account>/credentials.json` | Access and refresh tokens (`600`) |
+| `~/.dbhq/outlook/<account>/id_cache.json` | Short ID to full Graph ID |
 
-A pre-multi-account install with flat `~/.dbhq/outlook-graph/*.json` files is migrated into
+A pre-multi-account install with flat `~/.dbhq/outlook/*.json` files is migrated into
 `default/` on the first run of any script.
 
 ## Requirements
 
 | Skill | Required | Optional |
 |---|---|---|
-| `outlook-graph` | `azure-cli`, `jq`, `curl` | `pandoc`, for every markdown command |
+| `outlook` | `azure-cli`, `jq`, `curl` | `pandoc`, for every markdown command |
 | `outlook-to-md` | `python3` 3.9+ | `readpst` (`pst-utils`), the fallback PST backend |
 
-`install.sh` checks these per skill, so a missing `azure-cli` skips `outlook-graph` and leaves
+`install.sh` checks these per skill, so a missing `azure-cli` skips `outlook` and leaves
 `outlook-to-md` installed rather than failing the lot.

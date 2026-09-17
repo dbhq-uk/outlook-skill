@@ -6,7 +6,7 @@ easier to live with once you know why they were made.
 ## Two skills, one problem
 
 Mail arrives in two states: the correspondence you are handling now, and the correspondence
-someone handed you in a box. `outlook-graph` deals with the first, over the network, with
+someone handed you in a box. `outlook` deals with the first, over the network, with
 credentials. `outlook-to-md` deals with the second, entirely offline, with no credentials at
 all - it reads files.
 
@@ -15,7 +15,7 @@ nothing alike. A machine with no `azure-cli` can still turn a PST into markdown;
 checks requirements per skill and skips rather than fails, so you can take either half on its
 own.
 
-They join at one point: `.eml` files. `outlook-graph export` writes them, `outlook-to-md`
+They join at one point: `.eml` files. `outlook export` writes them, `outlook-to-md`
 reads a directory of them, and the result is one archive that spans the PST you were given and
 the mail that has arrived since.
 
@@ -28,7 +28,7 @@ that is not a file in the repository.
 Authentication is a **delegated** OAuth flow, not application permissions. The distinction
 matters: a delegated token can only ever do what the signed-in person can do in their own
 mailbox. There is no tenant-wide grant, no admin consent, and nothing here can reach another
-person's mail. Tokens live under `~/.dbhq/outlook-graph/<account>/` at mode `600` and refresh
+person's mail. Tokens live under `~/.dbhq/outlook/<account>/` at mode `600` and refresh
 themselves when a command needs it.
 
 Five scopes are requested and no more: `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`,
@@ -95,7 +95,7 @@ from the destination before acting on a message you have just moved.
 ## Email HTML that survives Outlook
 
 Every markdown-to-HTML conversion in the pack goes through one helper, `md_to_html` in
-`outlook-graph-mail.sh`, and applies its styling **inline** on each element:
+`outlook-mail.sh`, and applies its styling **inline** on each element:
 
 | Property | Value |
 |---|---|

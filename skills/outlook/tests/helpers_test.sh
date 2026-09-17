@@ -1,12 +1,12 @@
 #!/bin/bash
-# Offline unit tests for the pure/logic helpers in outlook-graph-mail.sh.
+# Offline unit tests for the pure/logic helpers in outlook-mail.sh.
 #
 # These extract the real functions from the script and exercise them with a
 # mocked api_call + date, so no Microsoft account or network is required.
 # They cover: URL-encoding, KQL detection, search paging/sort/cap, folder
 # resolution (BFS + Parent/Child paths), and the token-expiry decision.
 #
-#   bash skills/outlook-graph/tests/helpers_test.sh
+#   bash skills/outlook/tests/helpers_test.sh
 #
 # Requires: jq, grep, awk (same tools the skill itself uses).
 #
@@ -18,8 +18,8 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MAIL="$SCRIPT_DIR/scripts/outlook-graph-mail.sh"
-CAL="$SCRIPT_DIR/scripts/outlook-graph-calendar.sh"
+MAIL="$SCRIPT_DIR/scripts/outlook-mail.sh"
+CAL="$SCRIPT_DIR/scripts/outlook-calendar.sh"
 GRAPH_URL="https://graph.microsoft.com/v1.0"
 
 PASS=0; FAIL=0
@@ -487,12 +487,12 @@ CLI_MASTERCATS="$CLI_TMP/mastercats.json"
 CLI_MASTERCATS_POST="$CLI_TMP/mastercats_post.json"
 CLI_MASTERCATS_PATCH="$CLI_TMP/mastercats_patch.json"
 CLI_CURRENTCATS="$CLI_TMP/currentcats.json"
-mkdir -p "$CLI_HOME/.dbhq/outlook-graph/default"
+mkdir -p "$CLI_HOME/.dbhq/outlook/default"
 printf '%s' '{"client_id":"test-client","client_secret":"test-secret"}' \
-    > "$CLI_HOME/.dbhq/outlook-graph/default/config.json"
+    > "$CLI_HOME/.dbhq/outlook/default/config.json"
 printf '%s' '{"access_token":"test-token","refresh_token":"test-refresh","expires_at":9999999999}' \
-    > "$CLI_HOME/.dbhq/outlook-graph/default/credentials.json"
-chmod 600 "$CLI_HOME/.dbhq/outlook-graph/default/credentials.json"
+    > "$CLI_HOME/.dbhq/outlook/default/credentials.json"
+chmod 600 "$CLI_HOME/.dbhq/outlook/default/credentials.json"
 export CLI_LOG CLI_MASTERCATS CLI_MASTERCATS_POST CLI_MASTERCATS_PATCH CLI_CURRENTCATS
 
 # >100 chars so resolve_message_id's "looks like a full ID" short-circuit

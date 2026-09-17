@@ -22,7 +22,7 @@ echo
 missing_for() {
   local skill="$1" missing=""
   case "$skill" in
-    outlook-graph)
+    outlook)
       command -v az   >/dev/null 2>&1 || missing="$missing azure-cli"
       command -v jq   >/dev/null 2>&1 || missing="$missing jq"
       command -v curl >/dev/null 2>&1 || missing="$missing curl"
@@ -39,12 +39,15 @@ command -v readpst >/dev/null 2>&1 || echo "Optional: readpst not found (pst-uti
 echo
 
 # --- Retire skills that have been renamed -----------------------------------
-# pst-to-markdown became outlook-to-md once it also ingested live mail. An old
-# install is a symlink to a directory that no longer exists, so without this it
-# lingers beside the new skill as a dangling duplicate the agent may still match.
-for stale in pst-to-markdown; do
+# pst-to-markdown became outlook-to-md once it also ingested live mail, and
+# outlook-graph became outlook on 17 Sep 2026. An old install is a symlink to a
+# directory that no longer exists, so without this it lingers beside the new
+# skill as a dangling duplicate the agent may still match - and a dangling
+# outlook-graph is worse than a dangling pst-to-markdown, because an agent
+# reading its SKILL.md would call four scripts that are no longer there.
+for stale in pst-to-markdown outlook-graph; do
   if [ -e "$SKILLS_ROOT/$stale" ] || [ -L "$SKILLS_ROOT/$stale" ]; then
-    echo "Removing renamed skill '$stale' (now outlook-to-md)"
+    echo "Removing renamed skill '$stale'"
     rm -rf "$SKILLS_ROOT/$stale"
   fi
 done
@@ -89,11 +92,15 @@ echo
 echo "Installed as directory symlinks - all edits (scripts and SKILL.md) are live. Re-run only when adding a new skill."
 echo
 
-# --- Setup / credentials (outlook-graph only; outlook-to-md needs none) ---
-SETUP="$SKILLS_ROOT/outlook-graph/scripts/outlook-graph-setup.sh"
-if [ ! -e "$SKILLS_ROOT/outlook-graph" ]; then
-  echo "outlook-graph was not installed - skipping credential setup."
-elif [ -f "$HOME/.dbhq/outlook-graph/default/credentials.json" ] \
+# --- Setup / credentials (outlook only; outlook-to-md needs none) ---
+SETUP="$SKILLS_ROOT/outlook/scripts/outlook-setup.sh"
+if [ ! -e "$SKILLS_ROOT/outlook" ]; then
+  echo "outlook was not installed - skipping credential setup."
+# Every home the credentials have had, so an existing install is never sent
+# back through setup. outlook-token.sh moves them on its first run; this only
+# needs to RECOGNISE them, which is why it looks at all four paths.
+elif [ -f "$HOME/.dbhq/outlook/default/credentials.json" ] \
+  || [ -f "$HOME/.dbhq/outlook-graph/default/credentials.json" ] \
   || [ -f "$HOME/.outlook-graph/default/credentials.json" ] \
   || [ -f "$HOME/.outlook-graph/credentials.json" ]; then
   echo "Existing Outlook credentials found. Re-run setup any time with:"

@@ -4,10 +4,10 @@ Running more than one mailbox, and what to do when authentication stops working.
 
 ## More than one mailbox
 
-Each account keeps its own credentials under `~/.dbhq/outlook-graph/<account>/`. Add one:
+Each account keeps its own credentials under `~/.dbhq/outlook/<account>/`. Add one:
 
 ```bash
-~/.claude/skills/outlook-graph/scripts/outlook-graph-setup.sh --account work
+~/.claude/skills/outlook/scripts/outlook-setup.sh --account work
 ```
 
 That reuses the Azure app registration you already have if it finds one, so a second mailbox
@@ -22,12 +22,12 @@ Every script resolves the active account the same way, in this order:
 ```bash
 mail.sh -a work inbox
 OUTLOOK_ACCOUNT=work mail.sh inbox
-~/.claude/skills/outlook-graph/scripts/outlook-graph-token.sh list
+~/.claude/skills/outlook/scripts/outlook-token.sh list
 ```
 
 An install predating multi-account support keeps its files flat at
-`~/.dbhq/outlook-graph/{config,credentials,id_cache}.json`. The first run of any script moves them
-into `~/.dbhq/outlook-graph/default/`. Nothing to do, but do not be surprised.
+`~/.dbhq/outlook/{config,credentials,id_cache}.json`. The first run of any script moves them
+into `~/.dbhq/outlook/default/`. Nothing to do, but do not be surprised.
 
 ## Checking the connection
 
@@ -53,15 +53,15 @@ curl -s -H "Authorization: Bearer $T" \
 ## When it stops working
 
 **"Account 'x' not configured"** - there is no `credentials.json` under
-`~/.dbhq/outlook-graph/x/`. Run setup with `--account x`, or check you have not typo'd the name.
+`~/.dbhq/outlook/x/`. Run setup with `--account x`, or check you have not typo'd the name.
 
 **Token expired, and refresh also failed.** Refresh tokens last around 90 days of inactivity.
-Past that, re-authenticate: `outlook-graph-setup.sh`, or steps 6 and 7 of
-[`references/setup.md`](../../skills/outlook-graph/references/setup.md) by hand.
+Past that, re-authenticate: `outlook-setup.sh`, or steps 6 and 7 of
+[`references/setup.md`](../../skills/outlook/references/setup.md) by hand.
 
 **"Invalid client secret".** Client secrets are visible once, at creation. If yours is lost or
 expired, make a new one in the Azure portal under *Certificates & secrets* and update
-`client_secret` in `~/.dbhq/outlook-graph/<account>/config.json`.
+`client_secret` in `~/.dbhq/outlook/<account>/config.json`.
 
 **"AADSTS50011: Reply URL does not match".** The redirect URI in the app registration must be
 exactly `https://login.microsoftonline.com/common/oauth2/nativeclient`.
@@ -84,9 +84,9 @@ message is now.
 
 | Path | Contents |
 |---|---|
-| `~/.dbhq/outlook-graph/<account>/config.json` | Azure app client ID and secret, tenant, scopes |
-| `~/.dbhq/outlook-graph/<account>/credentials.json` | OAuth access and refresh tokens |
-| `~/.dbhq/outlook-graph/<account>/id_cache.json` | Short ID to full Graph ID mapping |
+| `~/.dbhq/outlook/<account>/config.json` | Azure app client ID and secret, tenant, scopes |
+| `~/.dbhq/outlook/<account>/credentials.json` | OAuth access and refresh tokens |
+| `~/.dbhq/outlook/<account>/id_cache.json` | Short ID to full Graph ID mapping |
 
 The account directory is `700` and both credential files `600`, in your home directory and
 nowhere else. Nothing is sent anywhere except

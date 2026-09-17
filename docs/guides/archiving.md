@@ -1,13 +1,13 @@
 # Building a markdown archive
 
 Turning a PST export into markdown you can grep, then keeping that archive current from live
-mail. This is `outlook-to-md`, with `outlook-graph` doing the fetching.
+mail. This is `outlook-to-md`, with `outlook` doing the fetching.
 
 Two paths recur below:
 
 ```bash
 MD=~/.claude/skills/outlook-to-md
-MAIL=~/.claude/skills/outlook-graph/scripts/outlook-graph-mail.sh
+MAIL=~/.claude/skills/outlook/scripts/outlook-mail.sh
 ```
 
 ## One-time setup
@@ -83,7 +83,7 @@ Grep is exact. Search on names, addresses and distinctive phrases rather than co
 ## Keep it current
 
 A PST is a snapshot of the day it was exported. To carry the archive forward, pull new mail
-with `outlook-graph` and append it - both skills write the same shape.
+with `outlook` and append it - both skills write the same shape.
 
 ```bash
 # 1. Export a folder as .eml

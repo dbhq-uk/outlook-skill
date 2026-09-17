@@ -17,7 +17,7 @@ echo
 missing_for() {
   local skill="$1" missing=""
   case "$skill" in
-    outlook-graph)
+    outlook)
       command -v az   >/dev/null 2>&1 || missing="$missing azure-cli"
       command -v jq   >/dev/null 2>&1 || missing="$missing jq"
       command -v curl >/dev/null 2>&1 || missing="$missing curl"
@@ -33,12 +33,13 @@ command -v pandoc  >/dev/null 2>&1 || echo "Optional: pandoc not found (needed f
 command -v readpst >/dev/null 2>&1 || echo "Optional: readpst not found (pst-utils; fallback PST backend if libratom fails)."
 echo
 
-# pst-to-markdown became outlook-to-md once it also ingested live mail. Its old
-# Codex install holds symlinks into a directory that no longer exists, so clear
-# it out rather than leave a broken duplicate skill beside the new one.
-for stale in pst-to-markdown; do
+# pst-to-markdown became outlook-to-md once it also ingested live mail, and
+# outlook-graph became outlook on 17 Sep 2026. An old Codex install holds
+# symlinks into a directory that no longer exists, so clear it out rather than
+# leave a broken duplicate skill beside the new one.
+for stale in pst-to-markdown outlook-graph; do
   if [ -e "$SKILLS_ROOT/$stale" ] || [ -L "$SKILLS_ROOT/$stale" ]; then
-    echo "Removing renamed skill '$stale' (now outlook-to-md)"
+    echo "Removing renamed skill '$stale'"
     rm -rf "$SKILLS_ROOT/$stale"
   fi
 done
@@ -89,4 +90,4 @@ if [ "$INSTALLED" -eq 0 ]; then
 fi
 
 echo
-echo "Installed for Codex. Run scripts/outlook-graph-setup.sh if you have not configured Outlook credentials."
+echo "Installed for Codex. Run scripts/outlook-setup.sh if you have not configured Outlook credentials."

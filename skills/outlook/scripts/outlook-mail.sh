@@ -3,13 +3,13 @@
 
 set -e
 
-BASE_DIR="$HOME/.dbhq/outlook-graph"
+BASE_DIR="$HOME/.dbhq/outlook"
 
-# One-time migration: settings used to live at ~/.outlook-graph
-if [ ! -e "$BASE_DIR" ] && [ -d "$HOME/.outlook-graph" ]; then
+# One-time migration: settings used to live at ~/.outlook
+if [ ! -e "$BASE_DIR" ] && [ -d "$HOME/.outlook" ]; then
     mkdir -p "$HOME/.dbhq"
     chmod 700 "$HOME/.dbhq"
-    mv "$HOME/.outlook-graph" "$BASE_DIR"
+    mv "$HOME/.outlook" "$BASE_DIR"
     chmod 700 "$BASE_DIR"
 fi
 
@@ -36,7 +36,7 @@ GRAPH_URL="https://graph.microsoft.com/v1.0"
 
 # Check credentials
 if [ ! -f "$CREDS_FILE" ]; then
-    echo "Error: Account '$ACCOUNT' not configured. Run: outlook-graph-setup.sh --account $ACCOUNT"
+    echo "Error: Account '$ACCOUNT' not configured. Run: outlook-setup.sh --account $ACCOUNT"
     exit 1
 fi
 
@@ -56,7 +56,7 @@ refresh_access_token() {
     client_secret=$(jq -r '.client_secret // empty' "$CONFIG_FILE")
 
     if [ -z "$refresh_token" ]; then
-        echo "Error: No refresh token. Run outlook-graph-setup.sh to re-authenticate." >&2
+        echo "Error: No refresh token. Run outlook-setup.sh to re-authenticate." >&2
         return 1
     fi
 
@@ -99,7 +99,7 @@ ensure_valid_token() {
 ACCESS_TOKEN=$(ensure_valid_token) || true
 
 if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
-    echo "Error: Invalid access token. Run outlook-graph-setup.sh to re-authenticate."
+    echo "Error: Invalid access token. Run outlook-setup.sh to re-authenticate."
     exit 1
 fi
 
@@ -191,7 +191,7 @@ die_on_error() {
 # Called after every listing command so that resolve_message_id can find
 # messages from any folder (inbox, subfolders, drafts, sent) without
 # expensive API cascading.
-# Written atomically: several agents/shells can share one ~/.dbhq/outlook-graph/<account>/
+# Written atomically: several agents/shells can share one ~/.dbhq/outlook/<account>/
 # and a plain `>` redirect lets a concurrent writer be observed mid-write, so a
 # reader can see a truncated (invalid) cache. Write to a temp file in the same
 # directory, then rename — rename is atomic, so a reader sees either the old
@@ -587,7 +587,7 @@ warn_if_not_sendable() {
     printf '%s\n' "$addrs" | address_in_list "$1" && return 0
     {
         echo "Warning: '$1' is not one of this mailbox's own addresses."
-        echo "  Run 'outlook-graph-mail.sh aliases' to list the addresses it can send as."
+        echo "  Run 'outlook-mail.sh aliases' to list the addresses it can send as."
         echo "  Proceeding: SendAs rights on a shared mailbox do not appear in that list."
         echo "  If the address is not permitted, the send fails with ErrorSendAsDenied."
     } >&2
@@ -787,7 +787,7 @@ case "$1" in
         sender="$2"
         count="${3:-10}"
         if [ -z "$sender" ]; then
-            echo "Usage: outlook-graph-mail.sh from <sender-email> [count]"
+            echo "Usage: outlook-mail.sh from <sender-email> [count]"
             exit 1
         fi
         echo "Fetching emails from $sender (newest first)..."
@@ -800,7 +800,7 @@ case "$1" in
         query="$2"
         count="${3:-10}"
         if [ -z "$query" ]; then
-            echo "Usage: outlook-graph-mail.sh search <query> [count]"
+            echo "Usage: outlook-mail.sh search <query> [count]"
             echo "  <query>  free text OR KQL field operators. Examples:"
             echo "             search \"invoice March\"                  free text"
             echo "             search 'subject:invoice AND from:jane@x.com'"
@@ -824,7 +824,7 @@ case "$1" in
     read)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh read <message-id>"
+            echo "Usage: outlook-mail.sh read <message-id>"
             exit 1
         fi
 
@@ -861,14 +861,14 @@ case "$1" in
                   "",
                   "--- Attachments (\($atts | length)) ---",
                   ( $atts[] | "- \(.name // "(unnamed)") | \(.contentType) | \(.size | format_size)\(if .isInline then " | inline" else "" end)" ),
-                  "Download with: outlook-graph-mail.sh download <message-id>   (saves to ./inbox/)"
+                  "Download with: outlook-mail.sh download <message-id>   (saves to ./inbox/)"
                 else empty end )'
         ;;
 
     preview)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh preview <message-id>"
+            echo "Usage: outlook-mail.sh preview <message-id>"
             exit 1
         fi
 
@@ -909,7 +909,7 @@ case "$1" in
         subject="$3"
         body="$4"
         if [ -z "$to" ] || [ -z "$subject" ]; then
-            echo "Usage: outlook-graph-mail.sh draft <to-email> <subject> <body>"
+            echo "Usage: outlook-mail.sh draft <to-email> <subject> <body>"
             exit 1
         fi
 
@@ -954,7 +954,7 @@ case "$1" in
         subject="$3"
         body="$4"
         if [ -z "$to" ] || [ -z "$subject" ]; then
-            echo "Usage: outlook-graph-mail.sh mddraft <to-email> <subject> <markdown-body>"
+            echo "Usage: outlook-mail.sh mddraft <to-email> <subject> <markdown-body>"
             exit 1
         fi
 
@@ -1002,7 +1002,7 @@ case "$1" in
         msg_id="$2"
         body="$3"
         if [ -z "$msg_id" ] || [ -z "$body" ]; then
-            echo "Usage: outlook-graph-mail.sh reply <message-id> <body>"
+            echo "Usage: outlook-mail.sh reply <message-id> <body>"
             exit 1
         fi
 
@@ -1040,7 +1040,7 @@ case "$1" in
         field="$3"
         value="$4"
         if [ -z "$draft_id" ] || [ -z "$field" ]; then
-            echo "Usage: outlook-graph-mail.sh update <draft-id> <field> <value>"
+            echo "Usage: outlook-mail.sh update <draft-id> <field> <value>"
             echo ""
             echo "Fields:"
             echo "  subject <text>     Update subject line"
@@ -1165,7 +1165,7 @@ case "$1" in
                 # warning rather than an error.
                 if [ -z "$value" ]; then
                     echo "Error: Email address required"
-                    echo "Run 'outlook-graph-mail.sh aliases' to list sendable addresses"
+                    echo "Run 'outlook-mail.sh aliases' to list sendable addresses"
                     exit 1
                 fi
                 warn_if_not_sendable "$value"
@@ -1210,7 +1210,7 @@ case "$1" in
         msg_id="$2"
         body="$3"
         if [ -z "$msg_id" ] || [ -z "$body" ]; then
-            echo "Usage: outlook-graph-mail.sh mdreply <message-id> <markdown-body>"
+            echo "Usage: outlook-mail.sh mdreply <message-id> <markdown-body>"
             exit 1
         fi
 
@@ -1283,7 +1283,7 @@ ${existing_body}"
         msg_id="$2"
         body="$3"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh followup <sent-message-id> [markdown-body]"
+            echo "Usage: outlook-mail.sh followup <sent-message-id> [markdown-body]"
             echo "       Creates a follow-up reply to your own sent email (chaser)"
             echo "       Body defaults to a standard follow-up message if not provided"
             exit 1
@@ -1359,7 +1359,7 @@ ${existing_body}"
             "Subject: \(.subject)"
         '
         echo
-        echo "Use 'outlook-graph-mail.sh send ${draft_id: -20}' to send"
+        echo "Use 'outlook-mail.sh send ${draft_id: -20}' to send"
         ;;
 
     forward)
@@ -1367,7 +1367,7 @@ ${existing_body}"
         to="$3"
         body="$4"
         if [ -z "$msg_id" ] || [ -z "$to" ]; then
-            echo "Usage: outlook-graph-mail.sh forward <message-id> <to-emails> [markdown-comment]"
+            echo "Usage: outlook-mail.sh forward <message-id> <to-emails> [markdown-comment]"
             echo "       Creates a forward DRAFT with the full quoted message and any"
             echo "       attachments. <to-emails> is comma/semicolon-separated. The"
             echo "       optional comment is markdown, converted to styled HTML."
@@ -1423,13 +1423,13 @@ ${existing_body}"
             "Subject: \(.subject)"
         '
         echo
-        echo "Use 'outlook-graph-mail.sh send ${draft_id: -20}' to send"
+        echo "Use 'outlook-mail.sh send ${draft_id: -20}' to send"
         ;;
 
     send)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh send <draft-id>"
+            echo "Usage: outlook-mail.sh send <draft-id>"
             exit 1
         fi
 
@@ -1472,7 +1472,7 @@ ${existing_body}"
     markread)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh markread <message-id>"
+            echo "Usage: outlook-mail.sh markread <message-id>"
             exit 1
         fi
 
@@ -1488,7 +1488,7 @@ ${existing_body}"
     markunread)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh markunread <message-id>"
+            echo "Usage: outlook-mail.sh markunread <message-id>"
             exit 1
         fi
 
@@ -1504,7 +1504,7 @@ ${existing_body}"
     flag)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh flag <message-id>"
+            echo "Usage: outlook-mail.sh flag <message-id>"
             exit 1
         fi
         if ! msg_id=$(resolve_message_id "$msg_id" "messages"); then
@@ -1518,7 +1518,7 @@ ${existing_body}"
     unflag)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh unflag <message-id>"
+            echo "Usage: outlook-mail.sh unflag <message-id>"
             exit 1
         fi
         if ! msg_id=$(resolve_message_id "$msg_id" "messages"); then
@@ -1544,7 +1544,7 @@ ${existing_body}"
         msg_id="$2"
         count="${3:-25}"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh thread <message-id> [count]"
+            echo "Usage: outlook-mail.sh thread <message-id> [count]"
             echo "       Lists every message in the same conversation, oldest first."
             exit 1
         fi
@@ -1581,7 +1581,7 @@ ${existing_body}"
     categorize)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh categorize <message-id> <categories>"
+            echo "Usage: outlook-mail.sh categorize <message-id> <categories>"
             echo "       <categories> is comma-separated (must match names from"
             echo "       'categories'); an empty string clears all categories."
             echo "       categorize <message-id> --add <category>     add one, keep the rest"
@@ -1596,12 +1596,12 @@ ${existing_body}"
             --add|--remove)
                 one="$4"
                 if [ -z "$one" ]; then
-                    echo "Usage: outlook-graph-mail.sh categorize <message-id> $3 <category>"
+                    echo "Usage: outlook-mail.sh categorize <message-id> $3 <category>"
                     exit 1
                 fi
                 if [ -n "$5" ]; then
                     echo "Error: too many arguments for $3; expected exactly one category name" >&2
-                    echo "Usage: outlook-graph-mail.sh categorize <message-id> $3 <category>" >&2
+                    echo "Usage: outlook-mail.sh categorize <message-id> $3 <category>" >&2
                     exit 1
                 fi
                 # Note: get-then-patch is not atomic; concurrent --add/--remove calls on the
@@ -1624,7 +1624,7 @@ ${existing_body}"
                         printf '%s' "$cat_id_check" | jq -r '.error.message // .error.code' >&2
                     elif [ -z "$cat_id_check" ]; then
                         echo "Note: '$one' is not in the master list, so it will show without a colour."
-                        echo "      Create it with: outlook-graph-mail.sh mkcategory \"$one\" <colour>"
+                        echo "      Create it with: outlook-mail.sh mkcategory \"$one\" <colour>"
                     fi
                 else
                     updated=$(printf '%s' "$current" | categories_remove "$one")
@@ -1662,7 +1662,7 @@ ${existing_body}"
         cat_name="$2"
         cat_colour="$3"
         if [ -z "$cat_name" ]; then
-            echo "Usage: outlook-graph-mail.sh mkcategory <name> [colour]"
+            echo "Usage: outlook-mail.sh mkcategory <name> [colour]"
             echo "       colour is a name (red, dark blue, ...) or a presetN value"
             echo "       Names: $CATEGORY_COLOUR_NAMES"
             exit 1
@@ -1704,7 +1704,7 @@ ${existing_body}"
         cat_name="$2"
         cat_colour="$3"
         if [ -z "$cat_name" ] || [ -z "$cat_colour" ]; then
-            echo "Usage: outlook-graph-mail.sh rccategory <name> <colour>"
+            echo "Usage: outlook-mail.sh rccategory <name> <colour>"
             echo "       colour is a name (red, dark blue, ...) or a presetN value"
             echo "       Names: $CATEGORY_COLOUR_NAMES"
             exit 1
@@ -1735,7 +1735,7 @@ ${existing_body}"
     rmcategory)
         cat_name="$2"
         if [ -z "$cat_name" ]; then
-            echo "Usage: outlook-graph-mail.sh rmcategory <name>"
+            echo "Usage: outlook-mail.sh rmcategory <name>"
             exit 1
         fi
         cat_id=$(resolve_category_id "$cat_name") && cat_rc=0 || cat_rc=$?
@@ -1753,13 +1753,13 @@ ${existing_body}"
         die_on_error "$result" "deleting category"
         echo "Category deleted from the master list: $cat_name"
         echo "Messages already carrying this label keep it. Strip one with:"
-        echo "  outlook-graph-mail.sh categorize <message-id> --remove \"$cat_name\""
+        echo "  outlook-mail.sh categorize <message-id> --remove \"$cat_name\""
         ;;
 
     junk)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh junk <message-id>"
+            echo "Usage: outlook-mail.sh junk <message-id>"
             exit 1
         fi
         if ! msg_id=$(resolve_message_id "$msg_id" "messages"); then
@@ -1778,7 +1778,7 @@ ${existing_body}"
     notjunk)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh notjunk <message-id>"
+            echo "Usage: outlook-mail.sh notjunk <message-id>"
             exit 1
         fi
         if ! msg_id=$(resolve_message_id "$msg_id" "messages"); then
@@ -1793,7 +1793,7 @@ ${existing_body}"
     delete)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh delete <message-id>"
+            echo "Usage: outlook-mail.sh delete <message-id>"
             exit 1
         fi
 
@@ -1809,7 +1809,7 @@ ${existing_body}"
     archive)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh archive <message-id>"
+            echo "Usage: outlook-mail.sh archive <message-id>"
             exit 1
         fi
 
@@ -1881,7 +1881,7 @@ ${existing_body}"
         folder_name="$2"
         count="${3:-10}"
         if [ -z "$folder_name" ]; then
-            echo "Usage: outlook-graph-mail.sh folder <folder-name> [count]"
+            echo "Usage: outlook-mail.sh folder <folder-name> [count]"
             exit 1
         fi
 
@@ -1915,7 +1915,7 @@ ${existing_body}"
         msg_id="$2"
         folder_name="$3"
         if [ -z "$msg_id" ] || [ -z "$folder_name" ]; then
-            echo "Usage: outlook-graph-mail.sh move <message-id> <folder-name>"
+            echo "Usage: outlook-mail.sh move <message-id> <folder-name>"
             exit 1
         fi
 
@@ -1949,7 +1949,7 @@ ${existing_body}"
     batch-move|bulk-move)
         folder_name="$2"
         if [ -z "$folder_name" ]; then
-            echo "Usage: outlook-graph-mail.sh batch-move <folder-name> <id1> [id2 ...]"
+            echo "Usage: outlook-mail.sh batch-move <folder-name> <id1> [id2 ...]"
             echo "       Message IDs may be given as arguments OR piped via stdin"
             echo "       (newline- or space-separated). The destination folder is"
             echo "       resolved once; moves run in batches of 20 via the Graph"
@@ -2041,7 +2041,7 @@ ${existing_body}"
         folder_name="$2"
         parent_folder="$3"
         if [ -z "$folder_name" ]; then
-            echo "Usage: outlook-graph-mail.sh mkdir <folder-name> [parent-folder]"
+            echo "Usage: outlook-mail.sh mkdir <folder-name> [parent-folder]"
             echo "       Without parent-folder, creates a top-level folder"
             exit 1
         fi
@@ -2081,7 +2081,7 @@ ${existing_body}"
         old_name="$2"
         new_name="$3"
         if [ -z "$old_name" ] || [ -z "$new_name" ]; then
-            echo "Usage: outlook-graph-mail.sh rename <folder-name> <new-name>"
+            echo "Usage: outlook-mail.sh rename <folder-name> <new-name>"
             exit 1
         fi
         case "$(echo "$old_name" | tr '[:upper:]' '[:lower:]')" in
@@ -2108,7 +2108,7 @@ ${existing_body}"
         target="$2"
         force="$3"
         if [ -z "$target" ]; then
-            echo "Usage: outlook-graph-mail.sh rmdir <folder-name> [--force]"
+            echo "Usage: outlook-mail.sh rmdir <folder-name> [--force]"
             echo "       Refuses to delete a non-empty folder unless --force is given"
             echo "       (deleted folder contents are moved to Deleted Items)."
             exit 1
@@ -2142,7 +2142,7 @@ ${existing_body}"
     attachments)
         msg_id="$2"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh attachments <message-id>"
+            echo "Usage: outlook-mail.sh attachments <message-id>"
             exit 1
         fi
 
@@ -2176,7 +2176,7 @@ ${existing_body}"
         msg_id="$2"
         attachment_id="$3"
         if [ -z "$msg_id" ]; then
-            echo "Usage: outlook-graph-mail.sh download <message-id> [attachment-id]"
+            echo "Usage: outlook-mail.sh download <message-id> [attachment-id]"
             echo "       Without attachment-id, downloads ALL attachments"
             exit 1
         fi
@@ -2276,7 +2276,7 @@ ${existing_body}"
         folder_name="$2"
         out_dir="$3"
         if [ -z "$folder_name" ] || [ -z "$out_dir" ]; then
-            echo "Usage: outlook-graph-mail.sh export <folder> <output-dir> [--since YYYY-MM-DD] [--count N]"
+            echo "Usage: outlook-mail.sh export <folder> <output-dir> [--since YYYY-MM-DD] [--count N]"
             echo "       Writes each message as raw .eml for outlook-to-md to append."
             exit 1
         fi
@@ -2380,7 +2380,7 @@ ${existing_body}"
         draft_id="$2"
         file_path="$3"
         if [ -z "$draft_id" ] || [ -z "$file_path" ]; then
-            echo "Usage: outlook-graph-mail.sh attach <draft-id> <file-path>"
+            echo "Usage: outlook-mail.sh attach <draft-id> <file-path>"
             exit 1
         fi
 
@@ -2520,7 +2520,7 @@ ${existing_body}"
     *)
         echo "Outlook Mail Operations"
         echo
-        echo "Usage: outlook-graph-mail.sh <command> [args]"
+        echo "Usage: outlook-mail.sh <command> [args]"
         echo
         echo "Reading:"
         echo "  inbox [count]              List inbox messages"

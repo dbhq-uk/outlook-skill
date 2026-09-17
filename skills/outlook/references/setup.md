@@ -1,6 +1,6 @@
 # Outlook Manual Setup Guide
 
-If you prefer to set up the Azure app registration manually (instead of using `outlook-graph-setup.sh`), follow these steps.
+If you prefer to set up the Azure app registration manually (instead of using `outlook-setup.sh`), follow these steps.
 
 ## Prerequisites
 
@@ -52,19 +52,19 @@ Note: Admin consent is NOT required for delegated permissions with personal/org 
 ## Step 5: Create Config Files
 
 > **Multi-account note:** This guide configures the `default` account. Credentials live
-> under `~/.dbhq/outlook-graph/<account>/`. The flat `~/.dbhq/outlook-graph/*.json` files below are auto-migrated
-> into `~/.dbhq/outlook-graph/default/` the first time any script runs, so you can write them flat here.
-> To set up an additional mailbox, prefer `outlook-graph-setup.sh --account <name>`, which reuses
+> under `~/.dbhq/outlook/<account>/`. The flat `~/.dbhq/outlook/*.json` files below are auto-migrated
+> into `~/.dbhq/outlook/default/` the first time any script runs, so you can write them flat here.
+> To set up an additional mailbox, prefer `outlook-setup.sh --account <name>`, which reuses
 > this app registration.
 
 Create the config directory:
 
 ```bash
-mkdir -p ~/.dbhq/outlook-graph
-chmod 700 ~/.dbhq ~/.dbhq/outlook-graph
+mkdir -p ~/.dbhq/outlook
+chmod 700 ~/.dbhq ~/.dbhq/outlook
 ```
 
-Create `~/.dbhq/outlook-graph/config.json`:
+Create `~/.dbhq/outlook/config.json`:
 
 ```json
 {
@@ -79,7 +79,7 @@ Create `~/.dbhq/outlook-graph/config.json`:
 Set permissions:
 
 ```bash
-chmod 600 ~/.dbhq/outlook-graph/config.json
+chmod 600 ~/.dbhq/outlook/config.json
 ```
 
 ## Step 6: Get Authorization Code
@@ -110,9 +110,9 @@ curl -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
   -d "redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient" \
   -d "grant_type=authorization_code" \
   -d "scope=offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read" \
-  > ~/.dbhq/outlook-graph/credentials.json
+  > ~/.dbhq/outlook/credentials.json
 
-chmod 600 ~/.dbhq/outlook-graph/credentials.json
+chmod 600 ~/.dbhq/outlook/credentials.json
 ```
 
 ## Step 8: Verify Setup
@@ -120,7 +120,7 @@ chmod 600 ~/.dbhq/outlook-graph/credentials.json
 Test the connection:
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/outlook-graph-token.sh test
+${CLAUDE_SKILL_DIR}/scripts/outlook-token.sh test
 ```
 
 You should see:
@@ -154,6 +154,6 @@ Tokens are automatically refreshed. If you see this error, it means the refresh 
 
 | File | Purpose |
 |------|---------|
-| `~/.dbhq/outlook-graph/config.json` | Azure app credentials |
-| `~/.dbhq/outlook-graph/credentials.json` | OAuth tokens |
+| `~/.dbhq/outlook/config.json` | Azure app credentials |
+| `~/.dbhq/outlook/credentials.json` | OAuth tokens |
 | `${CLAUDE_SKILL_DIR}/` | Skill and scripts |

@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="outlook-graph skill for Claude Code, by DBHQ" width="420">
+<img src="assets/logo.svg" alt="outlook skill for Claude Code, by DBHQ" width="420">
 
-# outlook-graph
+# outlook
 
 **Your Microsoft 365 mail, calendar and archives in the terminal - driven by Claude Code or Codex**
 
@@ -26,13 +26,13 @@ Two skills ship in this pack:
 
 | Skill | What it does | Needs |
 |---|---|---|
-| **`outlook-graph`** | Live Microsoft 365 mail and calendar via the Graph API | OAuth, network |
+| **`outlook`** | Live Microsoft 365 mail and calendar via the Graph API | OAuth, network |
 | **`outlook-to-md`** | Turns PST exports and live mail into integrity-verified markdown, offline | Nothing but a file |
 
 They cover the two halves of the same problem: the mail you are handling now, and the mail you
 were handed in a box - and they join up, so one archive spans both. `outlook-to-md` itself
 needs no credentials and makes no network calls; it reads files on disk, whether they came out
-of a PST or out of `outlook-graph`.
+of a PST or out of `outlook`.
 
 ## Why it is different
 
@@ -64,7 +64,7 @@ nothing that can reach another mailbox, and no admin consent to obtain.
 ## What it covers
 
 ```bash
-outlook-graph-mail.sh      inbox · unread · focused · sent · drafts · flagged · folder · from
+outlook-mail.sh      inbox · unread · focused · sent · drafts · flagged · folder · from
                            search · thread · read · preview · export
                            draft · mddraft · reply · mdreply · forward · followup
                            update · send · aliases
@@ -72,10 +72,10 @@ outlook-graph-mail.sh      inbox · unread · focused · sent · drafts · flagg
                            markread · flag · categorize · categories · junk · archive · delete
                            move · batch-move · mkdir · rename · rmdir · folders · stats
 
-outlook-graph-calendar.sh  events · today · week · day · search · read · calendars
+outlook-calendar.sh  events · today · week · day · search · read · calendars
                            create · invite · quick · update · respond · cancel · delete · free
 
-outlook-graph-token.sh     refresh · get · test · status · list
+outlook-token.sh     refresh · get · test · status · list
 
 outlook_to_md.py           <pst-or-eml-dir> <output-dir> [--append --timezone --owner-email …]
 ```
@@ -89,7 +89,7 @@ flag and default is in [docs/reference.md](docs/reference.md).
 
 ```
 /plugin marketplace add dbhq-uk/marketplace
-/plugin install outlook-graph@dbhq
+/plugin install outlook@dbhq
 ```
 
 Then run the one-time setup the skill points you to, and talk to it in plain language: *"check
@@ -98,7 +98,7 @@ my email"*, *"draft a reply to the last message from Sam"*, *"am I free Thursday
 ### Any agent (Cursor, Copilot, Windsurf, Gemini, Cline and more)
 
 ```bash
-npx skills add dbhq-uk/outlook-graph-skill
+npx skills add dbhq-uk/outlook-skill
 ```
 
 The [skills.sh](https://skills.sh) CLI installs into whichever agent directories it finds, so
@@ -107,14 +107,14 @@ this works outside Claude Code and Codex too. Both skills come in one command.
 ### Local install (Claude Code or Codex)
 
 ```bash
-git clone https://github.com/dbhq-uk/outlook-graph-skill.git
-cd outlook-graph-skill
+git clone https://github.com/dbhq-uk/outlook-skill.git
+cd outlook-skill
 ./install.sh          # Claude Code: symlinks into ~/.claude/skills (edits are live)
 ./install-codex.sh    # Codex: installs into ~/.codex/skills
 ```
 
-First run launches `outlook-graph-setup.sh`, which registers an Azure app and signs you in.
-Credentials are stored per account under `~/.dbhq/outlook-graph/<account>/`, never leave your
+First run launches `outlook-setup.sh`, which registers an Azure app and signs you in.
+Credentials are stored per account under `~/.dbhq/outlook/<account>/`, never leave your
 machine, and refresh themselves. The whole install-to-first-email path is
 [docs/getting-started.md](docs/getting-started.md).
 
@@ -125,7 +125,7 @@ you can take either half on its own.
 
 | Skill | Required | Optional |
 |---|---|---|
-| `outlook-graph` | `azure-cli` · `jq` · `curl` | `pandoc` (markdown-formatted emails) |
+| `outlook` | `azure-cli` · `jq` · `curl` | `pandoc` (markdown-formatted emails) |
 | `outlook-to-md` | `python3` (3.9+) | `readpst` (`pst-utils`; fallback PST backend) |
 
 `outlook-to-md` provisions its own virtualenv on install. Its preferred PST backend pins an
@@ -148,7 +148,7 @@ Hacking on it, or running from source with live edits: [docs/dev-setup.md](docs/
 
 ## Credentials and privacy
 
-No secrets live in this repository. Your tokens are stored locally under `~/.dbhq/outlook-graph/`
+No secrets live in this repository. Your tokens are stored locally under `~/.dbhq/outlook/`
 and used only to talk to Microsoft Graph directly from your machine.
 
 ## License

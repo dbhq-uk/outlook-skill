@@ -4,8 +4,8 @@ How to take a message from arriving to answered without losing a recipient, mang
 formatting, or sending before you meant to.
 
 Paths below are shortened to `mail.sh` for the mail script. In a real terminal that is
-`~/.claude/skills/outlook-graph/scripts/outlook-graph-mail.sh`, and inside the skill it is
-`${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh`.
+`~/.claude/skills/outlook/scripts/outlook-mail.sh`, and inside the skill it is
+`${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh`.
 
 ## Read the whole message first
 

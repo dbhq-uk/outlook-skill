@@ -412,7 +412,7 @@ class TestDirectoryDispatch(unittest.TestCase):
 class TestAppendRoundTrip(unittest.TestCase):
     """A re-run over the same staging directory must skip old mail and admit new mail.
 
-    This is the property the outlook-graph -> archive workflow relies on: a
+    This is the property the outlook -> archive workflow relies on: a
     --since window that overlaps what is already archived costs bandwidth and
     nothing else, because Message-ID dedupe absorbs the overlap, while mail
     outside the overlap still lands. Pinning "adds nothing" alone would also

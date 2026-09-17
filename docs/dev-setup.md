@@ -10,8 +10,8 @@ Set the skill up from source with a **live symlink install**, so your edits are 
 ## 1. Clone
 
 ```bash
-git clone https://github.com/dbhq-uk/outlook-graph-skill.git ~/dbhq-outlook-graph
-cd ~/dbhq-outlook-graph
+git clone https://github.com/dbhq-uk/outlook-skill.git ~/dbhq-outlook
+cd ~/dbhq-outlook
 ```
 
 ## 2. Install (symlink)
@@ -28,19 +28,19 @@ The committed skill references its scripts via `${CLAUDE_SKILL_DIR}` (the skill'
 Complete the setup the installer offers, or run it directly:
 
 ```bash
-~/.claude/skills/outlook-graph/scripts/outlook-graph-setup.sh
+~/.claude/skills/outlook/scripts/outlook-setup.sh
 ```
 
-It registers (or reuses) an Azure app and signs you in via OAuth. Credentials are stored under `~/.dbhq/outlook-graph/<account>/`, never in the repo, and tokens refresh automatically. If you've already set this up on another machine, you can copy `~/.dbhq/outlook-graph/` across instead of re-authenticating.
+It registers (or reuses) an Azure app and signs you in via OAuth. Credentials are stored under `~/.dbhq/outlook/<account>/`, never in the repo, and tokens refresh automatically. If you've already set this up on another machine, you can copy `~/.dbhq/outlook/` across instead of re-authenticating.
 
 ## 4. Verify
 
 ```bash
-~/.claude/skills/outlook-graph/scripts/outlook-graph-token.sh test
+~/.claude/skills/outlook/scripts/outlook-token.sh test
 ```
 
 Then, in Claude Code, try *"check my email"*.
 
 ## Working across machines
 
-Editing **anything** under `~/dbhq-outlook-graph` (scripts or `SKILL.md`) is live immediately in Claude Code - the whole skill directory is symlinked. For Codex, re-run `./install-codex.sh` after a `SKILL.md` edit. If you develop on more than one machine, `git pull` before you start and `git push` when done to keep them in sync.
+Editing **anything** under `~/dbhq-outlook` (scripts or `SKILL.md`) is live immediately in Claude Code - the whole skill directory is symlinked. For Codex, re-run `./install-codex.sh` after a `SKILL.md` edit. If you develop on more than one machine, `git pull` before you start and `git push` when done to keep them in sync.

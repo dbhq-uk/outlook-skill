@@ -3,13 +3,13 @@
 
 set -e
 
-BASE_DIR="$HOME/.dbhq/outlook-graph"
+BASE_DIR="$HOME/.dbhq/outlook"
 
-# One-time migration: settings used to live at ~/.outlook-graph
-if [ ! -e "$BASE_DIR" ] && [ -d "$HOME/.outlook-graph" ]; then
+# One-time migration: settings used to live at ~/.outlook
+if [ ! -e "$BASE_DIR" ] && [ -d "$HOME/.outlook" ]; then
     mkdir -p "$HOME/.dbhq"
     chmod 700 "$HOME/.dbhq"
-    mv "$HOME/.outlook-graph" "$BASE_DIR"
+    mv "$HOME/.outlook" "$BASE_DIR"
     chmod 700 "$BASE_DIR"
 fi
 
@@ -63,7 +63,7 @@ esac
 
 # Check credentials
 if [ ! -f "$CREDS_FILE" ]; then
-    echo "Error: Account '$ACCOUNT' not configured. Run: outlook-graph-setup.sh --account $ACCOUNT"
+    echo "Error: Account '$ACCOUNT' not configured. Run: outlook-setup.sh --account $ACCOUNT"
     exit 1
 fi
 
@@ -83,7 +83,7 @@ refresh_access_token() {
     client_secret=$(jq -r '.client_secret // empty' "$CONFIG_FILE")
 
     if [ -z "$refresh_token" ]; then
-        echo "Error: No refresh token. Run outlook-graph-setup.sh to re-authenticate." >&2
+        echo "Error: No refresh token. Run outlook-setup.sh to re-authenticate." >&2
         return 1
     fi
 
@@ -126,7 +126,7 @@ ensure_valid_token() {
 ACCESS_TOKEN=$(ensure_valid_token) || true
 
 if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
-    echo "Error: Invalid access token. Run outlook-graph-setup.sh to re-authenticate."
+    echo "Error: Invalid access token. Run outlook-setup.sh to re-authenticate."
     exit 1
 fi
 
@@ -175,7 +175,7 @@ api_call() {
 # Injected into the `read` filter. Block-level tags become line breaks BEFORE
 # tags are stripped, so an event description with paragraphs, bullet points or a
 # Teams join block stays readable instead of collapsing into one run-on line.
-# Kept identical to the helper in outlook-graph-mail.sh.
+# Kept identical to the helper in outlook-mail.sh.
 HTML_TO_TEXT='
     def html_to_text:
         gsub("(?is)<(script|style)[^>]*>.*?</(script|style)>"; " ")
@@ -315,7 +315,7 @@ case "$1" in
     read)
         event_id="$2"
         if [ -z "$event_id" ]; then
-            echo "Usage: outlook-graph-calendar.sh read <event-id>"
+            echo "Usage: outlook-calendar.sh read <event-id>"
             exit 1
         fi
 
@@ -354,7 +354,7 @@ case "$1" in
         attendees="${6:-}"
 
         if [ -z "$subject" ] || [ -z "$start_time" ] || [ -z "$end_time" ]; then
-            echo "Usage: outlook-graph-calendar.sh create <subject> <start-time> <end-time> [location] [attendees]"
+            echo "Usage: outlook-calendar.sh create <subject> <start-time> <end-time> [location] [attendees]"
             echo "Times in format: YYYY-MM-DDTHH:MM"
             echo "Attendees: comma/semicolon-separated emails; pass \"\" for location"
             echo "if you want attendees with no location. Invitations are sent."
@@ -405,7 +405,7 @@ case "$1" in
         emails="$3"
         att_type="${4:-required}"
         if [ -z "$event_id" ] || [ -z "$emails" ]; then
-            echo "Usage: outlook-graph-calendar.sh invite <event-id> <emails> [required|optional]"
+            echo "Usage: outlook-calendar.sh invite <event-id> <emails> [required|optional]"
             echo "       Adds attendees to an existing event and SENDS them invitations."
             echo "       Two-step flow: 'create' the event first (no attendees, nothing"
             echo "       sent), confirm the details, then 'invite'. Emails are"
@@ -456,7 +456,7 @@ case "$1" in
         start_time="$3"
 
         if [ -z "$subject" ] || [ -z "$start_time" ]; then
-            echo "Usage: outlook-graph-calendar.sh quick <subject> <start-time>"
+            echo "Usage: outlook-calendar.sh quick <subject> <start-time>"
             echo "Creates a 1-hour event. Time format: YYYY-MM-DDTHH:MM"
             exit 1
         fi
@@ -507,7 +507,7 @@ case "$1" in
         value="$4"
 
         if [ -z "$event_id" ] || [ -z "$field" ] || [ -z "$value" ]; then
-            echo "Usage: outlook-graph-calendar.sh update <event-id> <field> <value>"
+            echo "Usage: outlook-calendar.sh update <event-id> <field> <value>"
             echo "Fields: subject, location, start, end"
             exit 1
         fi
@@ -550,7 +550,7 @@ case "$1" in
     delete)
         event_id="$2"
         if [ -z "$event_id" ]; then
-            echo "Usage: outlook-graph-calendar.sh delete <event-id>"
+            echo "Usage: outlook-calendar.sh delete <event-id>"
             exit 1
         fi
 
@@ -568,7 +568,7 @@ case "$1" in
         event_id="$2"
         comment="${3:-}"
         if [ -z "$event_id" ]; then
-            echo "Usage: outlook-graph-calendar.sh cancel <event-id> [comment]"
+            echo "Usage: outlook-calendar.sh cancel <event-id> [comment]"
             echo "       Cancels a meeting YOU organise and notifies attendees."
             echo "       To decline someone else's invite, use: respond <id> decline"
             exit 1
@@ -592,7 +592,7 @@ case "$1" in
         answer="$3"
         comment="${4:-}"
         if [ -z "$event_id" ] || [ -z "$answer" ]; then
-            echo "Usage: outlook-graph-calendar.sh respond <event-id> <accept|decline|tentative> [comment]"
+            echo "Usage: outlook-calendar.sh respond <event-id> <accept|decline|tentative> [comment]"
             echo "       Responds to a meeting invitation and notifies the organiser."
             exit 1
         fi
@@ -620,7 +620,7 @@ case "$1" in
     day)
         day="$2"
         if [ -z "$day" ]; then
-            echo "Usage: outlook-graph-calendar.sh day <YYYY-MM-DD>"
+            echo "Usage: outlook-calendar.sh day <YYYY-MM-DD>"
             exit 1
         fi
         if ! [[ "$day" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
@@ -635,7 +635,7 @@ case "$1" in
         query="$2"
         days="${3:-90}"
         if [ -z "$query" ]; then
-            echo "Usage: outlook-graph-calendar.sh search <text> [days]"
+            echo "Usage: outlook-calendar.sh search <text> [days]"
             echo "       Case-insensitive match on subject/location over the next"
             echo "       <days> days (default 90)."
             exit 1
@@ -660,7 +660,7 @@ case "$1" in
         end_time="$3"
 
         if [ -z "$start_time" ] || [ -z "$end_time" ]; then
-            echo "Usage: outlook-graph-calendar.sh free <start-time> <end-time>"
+            echo "Usage: outlook-calendar.sh free <start-time> <end-time>"
             echo "Times in format: YYYY-MM-DDTHH:MM"
             exit 1
         fi
@@ -693,7 +693,7 @@ case "$1" in
     *)
         echo "Outlook Calendar Operations"
         echo
-        echo "Usage: outlook-graph-calendar.sh <command> [args]"
+        echo "Usage: outlook-calendar.sh <command> [args]"
         echo
         echo "Viewing:"
         echo "  events [count]             List upcoming events"

@@ -1,11 +1,11 @@
 ---
 name: outlook-to-md
-description: Turn Outlook mail into organised markdown archives - from a PST export, or from live mail exported by the outlook-graph skill. Use when needing to convert PST files to markdown, extract email archives, process Outlook exports, create searchable email collections, or keep an existing archive current. Trigger on phrases like "extract pst", "convert pst", "pst to markdown", "outlook to markdown", "email archive", "extract outlook", "update my email archive".
+description: Turn Outlook mail into organised markdown archives - from a PST export, or from live mail exported by the outlook skill. Use when needing to convert PST files to markdown, extract email archives, process Outlook exports, create searchable email collections, or keep an existing archive current. Trigger on phrases like "extract pst", "convert pst", "pst to markdown", "outlook to markdown", "email archive", "extract outlook", "update my email archive".
 ---
 
 # Outlook Email to Markdown
 
-Turn Outlook mail into an organised, integrity-verified archive of markdown files, raw email backups, and attachments. Reads a PST export, or a directory of `.eml` files - which is how live mail arrives, via the sibling `outlook-graph` skill's `export` verb. Supports full extraction and incremental append mode, so one archive can span both.
+Turn Outlook mail into an organised, integrity-verified archive of markdown files, raw email backups, and attachments. Reads a PST export, or a directory of `.eml` files - which is how live mail arrives, via the sibling `outlook` skill's `export` verb. Supports full extraction and incremental append mode, so one archive can span both.
 
 ## Prerequisites
 
@@ -65,11 +65,11 @@ ${CLAUDE_SKILL_DIR}/.venv/bin/python ${CLAUDE_SKILL_DIR}/scripts/outlook_to_md.p
 ### Keeping an Archive Current from Live Mail
 
 A PST is a snapshot. To carry an archive forward, export new mail with the
-sibling `outlook-graph` skill and append it — the two produce the same shape.
+sibling `outlook` skill and append it — the two produce the same shape.
 
 ```bash
-# 1. Export live mail as .eml (needs outlook-graph configured)
-${CLAUDE_SKILL_DIR}/../outlook-graph/scripts/outlook-graph-mail.sh \
+# 1. Export live mail as .eml (needs outlook configured)
+${CLAUDE_SKILL_DIR}/../outlook/scripts/outlook-mail.sh \
   export "Inbox/Clients" ./staging/ --since 2026-07-01
 
 # --count N caps how many messages export writes, newest first (default 1000)

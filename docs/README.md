@@ -31,7 +31,7 @@ mailbox, checking a connection, and every way authentication fails.
 **[Reference](reference.md)** &nbsp; Every command, argument, flag, environment variable and
 file, for all four scripts and `outlook_to_md.py`.
 
-**[Manual Azure setup](../skills/outlook-graph/references/setup.md)** &nbsp; The app
+**[Manual Azure setup](../skills/outlook/references/setup.md)** &nbsp; The app
 registration and OAuth exchange step by step, for when you would rather not let `setup.sh` do
 it. Ships inside the skill so it is available offline.
 

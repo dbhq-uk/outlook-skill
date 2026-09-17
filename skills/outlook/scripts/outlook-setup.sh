@@ -11,13 +11,13 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-BASE_DIR="$HOME/.dbhq/outlook-graph"
+BASE_DIR="$HOME/.dbhq/outlook"
 
-# One-time migration: settings used to live at ~/.outlook-graph
-if [ ! -e "$BASE_DIR" ] && [ -d "$HOME/.outlook-graph" ]; then
+# One-time migration: settings used to live at ~/.outlook
+if [ ! -e "$BASE_DIR" ] && [ -d "$HOME/.outlook" ]; then
     mkdir -p "$HOME/.dbhq"
     chmod 700 "$HOME/.dbhq"
-    mv "$HOME/.outlook-graph" "$BASE_DIR"
+    mv "$HOME/.outlook" "$BASE_DIR"
     chmod 700 "$BASE_DIR"
 fi
 

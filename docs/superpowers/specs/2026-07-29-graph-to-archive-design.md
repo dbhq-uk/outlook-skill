@@ -1,7 +1,7 @@
 # Keeping a PST archive current from live mail
 
 **Status:** design, approved 29 July 2026
-**Skills touched:** `outlook-graph`, `outlook-to-md`
+**Skills touched:** `outlook`, `outlook-to-md`
 
 ## Problem
 
@@ -85,26 +85,26 @@ So `staging/Inbox/Cherise/anything.eml` lands at
 directory's *layout* is the archive's layout; the `.eml` filename itself is
 never read for naming and only has to be unique.
 
-The one missing piece is that `outlook-graph` cannot currently write `.eml`.
+The one missing piece is that `outlook` cannot currently write `.eml`.
 Graph serves raw RFC 822 MIME at `GET /me/messages/{id}/$value` - the same
 `$value` pattern the attachment downloader already uses
-(`outlook-graph-mail.sh:1930`). That MIME carries the real `Message-ID` header,
+(`outlook-mail.sh:1930`). That MIME carries the real `Message-ID` header,
 which is exactly what `--append` deduplicates on.
 
 ### Why staging rather than writing the archive directly
 
 `export` writes plain `.eml` and stops. It does not know about `email.md`,
 checksums or the index. This keeps the skills independently changeable: the
-archive format belongs to `outlook-to-md` alone, and `outlook-graph` gains a
+archive format belongs to `outlook-to-md` alone, and `outlook` gains a
 generally useful export verb rather than a coupling to another skill's
 on-disk format.
 
 ## Work
 
-### 1. `export` verb in `outlook-graph-mail.sh`
+### 1. `export` verb in `outlook-mail.sh`
 
 ```
-outlook-graph-mail.sh export <folder> <output-dir> [--since YYYY-MM-DD] [--count N]
+outlook-mail.sh export <folder> <output-dir> [--since YYYY-MM-DD] [--count N]
 ```
 
 - Resolve `<folder>` with the existing `resolve_folder_id`, so folder naming
@@ -122,7 +122,7 @@ outlook-graph-mail.sh export <folder> <output-dir> [--since YYYY-MM-DD] [--count
   id guarantees uniqueness when two messages share a second.
 - `--since YYYY-MM-DD` adds a Graph `$filter` on `receivedDateTime`. Chosen
   over reading a watermark out of `index.csv` deliberately: a watermark would
-  couple `outlook-graph` to `outlook-to-md`'s file format and stop the two
+  couple `outlook` to `outlook-to-md`'s file format and stop the two
   changing independently. `--append` still backstops any overlap, so a `--since`
   that reaches back too far costs bandwidth and nothing else.
 - `--count N` caps total messages, for spot checks.
@@ -137,7 +137,7 @@ parse it as an email.
 In both `SKILL.md` files:
 
 ```bash
-outlook-graph-mail.sh export Inbox/Cherise ./staging/ --since 2026-07-01
+outlook-mail.sh export Inbox/Cherise ./staging/ --since 2026-07-01
 
 ${CLAUDE_SKILL_DIR}/../outlook-to-md/.venv/bin/python \
   ${CLAUDE_SKILL_DIR}/../outlook-to-md/scripts/outlook_to_md.py \

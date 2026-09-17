@@ -24,20 +24,20 @@ Azure CLI has its own installer, documented by
 
 ```
 /plugin marketplace add dbhq-uk/marketplace
-/plugin install outlook-graph@dbhq
+/plugin install outlook@dbhq
 ```
 
 Both skills arrive together. If you would rather run from a clone, `./install.sh` symlinks
 the same two directories into `~/.claude/skills/` - see [dev-setup](dev-setup.md).
 
-The examples below spell out the script path as `~/.claude/skills/outlook-graph/scripts/`,
+The examples below spell out the script path as `~/.claude/skills/outlook/scripts/`,
 which is where a local install puts it. A plugin install lives elsewhere and you will not
 normally type the path at all: you ask in plain language and the skill runs the command.
 
 ## 2. Authenticate
 
 ```bash
-~/.claude/skills/outlook-graph/scripts/outlook-graph-setup.sh
+~/.claude/skills/outlook/scripts/outlook-setup.sh
 ```
 
 It registers an Azure app for you (or reuses one it finds), opens a sign-in, and asks you to
@@ -46,12 +46,12 @@ consent to five delegated permissions: `Mail.ReadWrite`, `Mail.Send`, `Calendars
 lets it read anyone else's mailbox, and nothing lets it act while you are not signed in
 beyond the refresh token's life.
 
-Credentials land in `~/.dbhq/outlook-graph/default/`, mode `600`, and never go anywhere else.
+Credentials land in `~/.dbhq/outlook/default/`, mode `600`, and never go anywhere else.
 
 Check it worked:
 
 ```bash
-~/.claude/skills/outlook-graph/scripts/outlook-graph-token.sh test
+~/.claude/skills/outlook/scripts/outlook-token.sh test
 ```
 
 ```
@@ -60,13 +60,13 @@ Inbox: 1,284 total, 12 unread
 ```
 
 If that fails, [accounts and tokens](guides/accounts.md) covers every way it can, and
-[`references/setup.md`](../skills/outlook-graph/references/setup.md) walks the Azure
+[`references/setup.md`](../skills/outlook/references/setup.md) walks the Azure
 registration by hand.
 
 ## 3. Read the inbox
 
 ```bash
-~/.claude/skills/outlook-graph/scripts/outlook-graph-mail.sh inbox 5
+~/.claude/skills/outlook/scripts/outlook-mail.sh inbox 5
 ```
 
 ```
@@ -85,7 +85,7 @@ list-then-act flow costs no extra API calls.
 Now open one properly:
 
 ```bash
-~/.claude/skills/outlook-graph/scripts/outlook-graph-mail.sh read AAkALgAAAAAAHYQDEapm
+~/.claude/skills/outlook/scripts/outlook-mail.sh read AAkALgAAAAAAHYQDEapm
 ```
 
 That prints the full body, the complete `To:` and `Cc:` lists, and any attachments. There is
@@ -95,7 +95,7 @@ right message in a list, never for deciding what a message says.
 ## 4. Write one to yourself
 
 ```bash
-~/.claude/skills/outlook-graph/scripts/outlook-graph-mail.sh mddraft \
+~/.claude/skills/outlook/scripts/outlook-mail.sh mddraft \
   "you@example.com" "First draft from the terminal" \
   "This is **markdown**, converted to HTML with the Aptos stack Outlook expects."
 ```
@@ -115,13 +115,13 @@ command.
 Send it:
 
 ```bash
-~/.claude/skills/outlook-graph/scripts/outlook-graph-mail.sh send AAkALgAAAAAAHYQDEcm2
+~/.claude/skills/outlook/scripts/outlook-mail.sh send AAkALgAAAAAAHYQDEcm2
 ```
 
 ## 5. Look at the calendar
 
 ```bash
-~/.claude/skills/outlook-graph/scripts/outlook-graph-calendar.sh today
+~/.claude/skills/outlook/scripts/outlook-calendar.sh today
 ```
 
 If the first line of output is a note about times being in UTC, read it. The script reports

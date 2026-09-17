@@ -2,19 +2,19 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let `outlook-graph` export live mail as `.eml` so `outlook-to-md` can append it to an existing archive in the identical shape.
+**Goal:** Let `outlook` export live mail as `.eml` so `outlook-to-md` can append it to an existing archive in the identical shape.
 
-**Architecture:** A new `export` verb in `outlook-graph-mail.sh` writes raw MIME from Graph's `$value` endpoint into a staging directory whose layout mirrors the mail folder. `outlook_to_md.py` then consumes that directory in its existing directory mode with `--append`, which dedupes by `Message-ID`. The staging format is plain `.eml` and nothing more, so the archive format stays owned by `outlook-to-md` alone.
+**Architecture:** A new `export` verb in `outlook-mail.sh` writes raw MIME from Graph's `$value` endpoint into a staging directory whose layout mirrors the mail folder. `outlook_to_md.py` then consumes that directory in its existing directory mode with `--append`, which dedupes by `Message-ID`. The staging format is plain `.eml` and nothing more, so the archive format stays owned by `outlook-to-md` alone.
 
-**Tech Stack:** Bash + curl + jq (outlook-graph); Python 3.9+ stdlib + `unittest` (outlook-to-md).
+**Tech Stack:** Bash + curl + jq (outlook); Python 3.9+ stdlib + `unittest` (outlook-to-md).
 
 **Spec:** `docs/superpowers/specs/2026-07-29-graph-to-archive-design.md`
 
 ## Global Constraints
 
 - **Python floor is 3.9.** `parse_email_address` annotates `tuple[str, str]` at runtime with no `from __future__ import annotations` in `outlook_to_md.py`, so PEP 585 builtin generics must exist. CI runs 3.9, 3.11, 3.13.
-- **Bash, not Python, for the outlook-graph side.** Every script in that skill is bash + curl + jq; do not introduce a new runtime.
-- **Never leave a Graph error body on disk named `.eml`.** Use `curl -sf` and delete the part-written file on failure, matching the attachment downloader at `outlook-graph-mail.sh:1930`.
+- **Bash, not Python, for the outlook side.** Every script in that skill is bash + curl + jq; do not introduce a new runtime.
+- **Never leave a Graph error body on disk named `.eml`.** Use `curl -sf` and delete the part-written file on failure, matching the attachment downloader at `outlook-mail.sh:1930`.
 - **Test helpers must be top-level functions.** `helpers_test.sh` extracts functions by matching `^name() {` through the first line that is exactly `}` (`extract_fn`, line 31). Logic buried in a `case` branch cannot be tested offline.
 - **British English in all prose and comments.** Match the surrounding files.
 - **Comments explain why, not what.** The existing code comments justify non-obvious decisions; match that density and tone.
@@ -23,11 +23,11 @@
 
 ### Task 1: Filename and `--since` helpers
 
-Two pure functions, no network. They go in `outlook-graph-mail.sh` just above the `# Commands` marker (currently line 568), after `run_message_search`.
+Two pure functions, no network. They go in `outlook-mail.sh` just above the `# Commands` marker (currently line 568), after `run_message_search`.
 
 **Files:**
-- Modify: `skills/outlook-graph/scripts/outlook-graph-mail.sh` (insert before `# Commands`, line 568)
-- Test: `skills/outlook-graph/tests/helpers_test.sh`
+- Modify: `skills/outlook/scripts/outlook-mail.sh` (insert before `# Commands`, line 568)
+- Test: `skills/outlook/tests/helpers_test.sh`
 
 **Interfaces:**
 - Consumes: `urlencode` (already defined, line 421)
@@ -37,7 +37,7 @@ Two pure functions, no network. They go in `outlook-graph-mail.sh` just above th
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `skills/outlook-graph/tests/helpers_test.sh`, immediately before the final `rm -f "$body_file" ...` cleanup line:
+Add to `skills/outlook/tests/helpers_test.sh`, immediately before the final `rm -f "$body_file" ...` cleanup line:
 
 ```bash
 ########################################
@@ -69,12 +69,12 @@ eq "since rejects a partial date"       "1" "$(export_since_filter '2026-07' 2>/
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `bash skills/outlook-graph/tests/helpers_test.sh`
+Run: `bash skills/outlook/tests/helpers_test.sh`
 Expected: FAIL — `extract_fn` returns nothing for the two undefined functions, so the `eval`s are no-ops and each `export_*` call reports "command not found" with empty output.
 
 - [ ] **Step 3: Write the implementation**
 
-Insert into `skills/outlook-graph/scripts/outlook-graph-mail.sh` immediately before the `# Commands` comment:
+Insert into `skills/outlook/scripts/outlook-mail.sh` immediately before the `# Commands` comment:
 
 ```bash
 # --- .eml export ------------------------------------------------------------
@@ -107,13 +107,13 @@ export_since_filter() {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `bash skills/outlook-graph/tests/helpers_test.sh`
+Run: `bash skills/outlook/tests/helpers_test.sh`
 Expected: PASS, with `FAIL=0` on the summary line.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/outlook-graph/scripts/outlook-graph-mail.sh skills/outlook-graph/tests/helpers_test.sh
+git add skills/outlook/scripts/outlook-mail.sh skills/outlook/tests/helpers_test.sh
 git commit -m "feat(export): staging filename and --since validation helpers"
 ```
 
@@ -122,8 +122,8 @@ git commit -m "feat(export): staging filename and --since validation helpers"
 ### Task 2: Message-listing helper with paging
 
 **Files:**
-- Modify: `skills/outlook-graph/scripts/outlook-graph-mail.sh` (after `export_since_filter` from Task 1)
-- Test: `skills/outlook-graph/tests/helpers_test.sh`
+- Modify: `skills/outlook/scripts/outlook-mail.sh` (after `export_since_filter` from Task 1)
+- Test: `skills/outlook/tests/helpers_test.sh`
 
 **Interfaces:**
 - Consumes: `api_call` (line 157), `urlencode` (line 421), `export_since_filter` (Task 1), `GRAPH_URL`
@@ -131,7 +131,7 @@ git commit -m "feat(export): staging filename and --since validation helpers"
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `skills/outlook-graph/tests/helpers_test.sh`, after the Task 1 block:
+Append to `skills/outlook/tests/helpers_test.sh`, after the Task 1 block:
 
 ```bash
 ########################################
@@ -173,7 +173,7 @@ eq "export reports the Graph error message" "1" \
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `bash skills/outlook-graph/tests/helpers_test.sh`
+Run: `bash skills/outlook/tests/helpers_test.sh`
 Expected: FAIL — `export_list_messages` is not yet defined.
 
 - [ ] **Step 3: Write the implementation**
@@ -223,13 +223,13 @@ export_list_messages() {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `bash skills/outlook-graph/tests/helpers_test.sh`
+Run: `bash skills/outlook/tests/helpers_test.sh`
 Expected: PASS, `FAIL=0`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/outlook-graph/scripts/outlook-graph-mail.sh skills/outlook-graph/tests/helpers_test.sh
+git add skills/outlook/scripts/outlook-mail.sh skills/outlook/tests/helpers_test.sh
 git commit -m "feat(export): folder message listing with paging, cap and --since"
 ```
 
@@ -238,22 +238,22 @@ git commit -m "feat(export): folder message listing with paging, cap and --since
 ### Task 3: The `export` verb
 
 **Files:**
-- Modify: `skills/outlook-graph/scripts/outlook-graph-mail.sh` (new `case` branch; help text near line 2103)
+- Modify: `skills/outlook/scripts/outlook-mail.sh` (new `case` branch; help text near line 2103)
 
 **Interfaces:**
 - Consumes: `resolve_folder_id` (line 266), `export_list_messages` (Task 2), `export_eml_filename` (Task 1), `ACCESS_TOKEN`, `GRAPH_URL`
-- Produces: `outlook-graph-mail.sh export <folder> <output-dir> [--since YYYY-MM-DD] [--count N]`
+- Produces: `outlook-mail.sh export <folder> <output-dir> [--since YYYY-MM-DD] [--count N]`
 
 - [ ] **Step 1: Add the `case` branch**
 
-Insert into `skills/outlook-graph/scripts/outlook-graph-mail.sh` immediately after the `download)` branch ends (the `;;` following the attachment loop) and before `attach)`:
+Insert into `skills/outlook/scripts/outlook-mail.sh` immediately after the `download)` branch ends (the `;;` following the attachment loop) and before `attach)`:
 
 ```bash
     export)
         folder_name="$2"
         out_dir="$3"
         if [ -z "$folder_name" ] || [ -z "$out_dir" ]; then
-            echo "Usage: outlook-graph-mail.sh export <folder> <output-dir> [--since YYYY-MM-DD] [--count N]"
+            echo "Usage: outlook-mail.sh export <folder> <output-dir> [--since YYYY-MM-DD] [--count N]"
             echo "       Writes each message as raw .eml for outlook-to-md to append."
             exit 1
         fi
@@ -330,20 +330,20 @@ In the `*)` usage block, add this line at the end of the "Reading:" group — di
 
 - [ ] **Step 3: Verify the script still parses and the helper tests still pass**
 
-Run: `bash -n skills/outlook-graph/scripts/outlook-graph-mail.sh && bash skills/outlook-graph/tests/helpers_test.sh`
+Run: `bash -n skills/outlook/scripts/outlook-mail.sh && bash skills/outlook/tests/helpers_test.sh`
 Expected: no syntax output, and `FAIL=0`.
 
 - [ ] **Step 4: Verify argument handling without a mailbox**
 
 The credentials guard at the top of the script exits before any command runs when no account is configured, so run these against a configured account, or accept the credentials error as proof the branch was reached:
 
-Run: `skills/outlook-graph/scripts/outlook-graph-mail.sh export 2>&1 | head -3`
-Expected: the usage line `Usage: outlook-graph-mail.sh export <folder> <output-dir> …` (or the "Account not configured" error if no account exists — in which case verify the branch by inspection instead).
+Run: `skills/outlook/scripts/outlook-mail.sh export 2>&1 | head -3`
+Expected: the usage line `Usage: outlook-mail.sh export <folder> <output-dir> …` (or the "Account not configured" error if no account exists — in which case verify the branch by inspection instead).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/outlook-graph/scripts/outlook-graph-mail.sh
+git add skills/outlook/scripts/outlook-mail.sh
 git commit -m "feat(export): add the export verb writing folder mail as .eml"
 ```
 
@@ -470,7 +470,7 @@ Add to `skills/outlook-to-md/tests/test_outlook_to_md.py`, after `TestDirectoryD
 class TestAppendRoundTrip(unittest.TestCase):
     """Second run over the same staging directory must add nothing.
 
-    This is the property the outlook-graph -> archive workflow relies on: a
+    This is the property the outlook -> archive workflow relies on: a
     --since window that overlaps what is already archived costs bandwidth and
     nothing else, because Message-ID dedupe absorbs the overlap.
     """
@@ -546,13 +546,13 @@ git commit -m "test(pst): pin append idempotence and staging-to-archive layout"
 ### Task 6: Document the workflow
 
 **Files:**
-- Modify: `skills/outlook-graph/SKILL.md` (new section after "Attachments", before "Email Management")
+- Modify: `skills/outlook/SKILL.md` (new section after "Attachments", before "Email Management")
 - Modify: `skills/outlook-to-md/SKILL.md` (new section after "Incremental Extraction (Append Mode)")
 - Modify: `README.md` (extend the "PST archives" section, around line 132)
 
-- [ ] **Step 1: Add the outlook-graph section**
+- [ ] **Step 1: Add the outlook section**
 
-In `skills/outlook-graph/SKILL.md`, after the "### Attachments" block:
+In `skills/outlook/SKILL.md`, after the "### Attachments" block:
 
 ````markdown
 ### Exporting Mail to a Markdown Archive
@@ -562,10 +562,10 @@ them to an archive. The PST backfills history; this keeps it current.
 
 ```bash
 # Everything in a folder
-${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh export "Inbox/Clients" ./staging/
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh export "Inbox/Clients" ./staging/
 
 # Only what arrived since a date (use the archive's newest entry)
-${CLAUDE_SKILL_DIR}/scripts/outlook-graph-mail.sh export "Inbox/Clients" ./staging/ --since 2026-07-01
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh export "Inbox/Clients" ./staging/ --since 2026-07-01
 
 # Then append into the archive - dedupes by Message-ID, so an overlapping
 # --since window is harmless
@@ -586,11 +586,11 @@ In `skills/outlook-to-md/SKILL.md`, after the "### Incremental Extraction (Appen
 ### Keeping an Archive Current from Live Mail
 
 A PST is a snapshot. To carry an archive forward, export new mail with the
-sibling `outlook-graph` skill and append it — the two produce the same shape.
+sibling `outlook` skill and append it — the two produce the same shape.
 
 ```bash
-# 1. Export live mail as .eml (needs outlook-graph configured)
-${CLAUDE_SKILL_DIR}/../outlook-graph/scripts/outlook-graph-mail.sh \
+# 1. Export live mail as .eml (needs outlook configured)
+${CLAUDE_SKILL_DIR}/../outlook/scripts/outlook-mail.sh \
   export "Inbox/Clients" ./staging/ --since 2026-07-01
 
 # 2. Append it to the existing archive
@@ -610,11 +610,11 @@ In `README.md`, after the paragraph ending "Nothing is uploaded and nothing is s
 
 ````markdown
 A PST is a snapshot, so the two skills join up to carry an archive forward:
-`outlook-graph` exports new mail as `.eml` and `outlook-to-md` appends it in
+`outlook` exports new mail as `.eml` and `outlook-to-md` appends it in
 the same shape, deduplicating by `Message-ID`.
 
 ```bash
-outlook-graph-mail.sh export "Inbox/Clients" ./staging/ --since 2026-07-01
+outlook-mail.sh export "Inbox/Clients" ./staging/ --since 2026-07-01
 outlook_to_md.py ./staging/ ./archive/ --append
 ```
 ````
@@ -623,9 +623,9 @@ outlook_to_md.py ./staging/ ./archive/ --append
 
 The `validate` job checks each `SKILL.md`'s frontmatter and that its description stays under 1024 characters. Neither section touches frontmatter, but run the check:
 
-Run: `bash -n skills/outlook-graph/scripts/outlook-graph-mail.sh && python3 -c "
+Run: `bash -n skills/outlook/scripts/outlook-mail.sh && python3 -c "
 import re,sys
-for f in ['skills/outlook-graph/SKILL.md','skills/outlook-to-md/SKILL.md']:
+for f in ['skills/outlook/SKILL.md','skills/outlook-to-md/SKILL.md']:
     t=open(f).read()
     m=re.match(r'^---\n(.*?)\n---\n', t, re.S)
     assert m, f+': missing frontmatter'
@@ -638,7 +638,7 @@ Expected: both files print `OK`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add skills/outlook-graph/SKILL.md skills/outlook-to-md/SKILL.md README.md
+git add skills/outlook/SKILL.md skills/outlook-to-md/SKILL.md README.md
 git commit -m "docs: document exporting live mail into a markdown archive"
 ```
 
@@ -658,7 +658,7 @@ find skills -name '*.py' -not -path '*/.venv/*' \
   -exec python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" {} \;
 echo "python parse ok"
 
-bash skills/outlook-graph/tests/helpers_test.sh
+bash skills/outlook/tests/helpers_test.sh
 (cd skills/outlook-to-md && ./.venv/bin/python -m pytest tests/ -q -p no:cacheprovider)
 ```
 
@@ -669,7 +669,7 @@ Expected: `fail=0`, `FAIL=0` from the bash suite, and no pytest failures.
 Only if an Outlook account is configured. Pick a small folder:
 
 ```bash
-skills/outlook-graph/scripts/outlook-graph-mail.sh export "Inbox" /tmp/rt-staging --count 3
+skills/outlook/scripts/outlook-mail.sh export "Inbox" /tmp/rt-staging --count 3
 skills/outlook-to-md/.venv/bin/python skills/outlook-to-md/scripts/outlook_to_md.py \
   /tmp/rt-staging /tmp/rt-archive --append
 find /tmp/rt-archive/emails -name email.md | head
@@ -687,12 +687,12 @@ Expected: three email folders, the second run reporting 3 skipped and 0 processe
 ```bash
 git push -u origin feat/graph-to-archive
 gh pr create --base main --title "feat: keep a PST archive current from live mail" --body "$(cat <<'EOF'
-Joins the pack's two halves: the PST backfills history, `outlook-graph` appends
+Joins the pack's two halves: the PST backfills history, `outlook` appends
 new mail into the identical archive shape.
 
 ## What changed
 
-- `outlook-graph-mail.sh export <folder> <dir> [--since] [--count]` writes a
+- `outlook-mail.sh export <folder> <dir> [--since] [--count]` writes a
   folder's messages as raw `.eml` via Graph's `$value` MIME endpoint, paging
   through `@odata.nextLink`.
 - `outlook_to_md.py` now tests for a directory input *before* selecting a

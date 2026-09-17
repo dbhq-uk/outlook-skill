@@ -4,7 +4,7 @@ Viewing a diary, booking a meeting without accidentally inviting anyone, answeri
 invitations, and getting the timezone right.
 
 `calendar.sh` below is
-`~/.claude/skills/outlook-graph/scripts/outlook-graph-calendar.sh`.
+`~/.claude/skills/outlook/scripts/outlook-calendar.sh`.
 
 ## Fix the timezone first
 

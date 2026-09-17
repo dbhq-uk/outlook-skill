@@ -27,14 +27,14 @@ between your machine and Microsoft directly.
 
 ### Credentials
 
-Tokens live under `~/.dbhq/outlook-graph/<account>/`, with permissions set explicitly
+Tokens live under `~/.dbhq/outlook/<account>/`, with permissions set explicitly
 rather than left to the umask:
 
 ```
-~/.dbhq/outlook-graph/                            700   base directory
-~/.dbhq/outlook-graph/<account>/                  700   per-account directory
-~/.dbhq/outlook-graph/<account>/config.json       600   app registration details
-~/.dbhq/outlook-graph/<account>/credentials.json  600   access and refresh tokens
+~/.dbhq/outlook/                            700   base directory
+~/.dbhq/outlook/<account>/                  700   per-account directory
+~/.dbhq/outlook/<account>/config.json       600   app registration details
+~/.dbhq/outlook/<account>/credentials.json  600   access and refresh tokens
 ```
 
 The credentials file is rewritten at `600` on every token refresh, not only at
@@ -45,7 +45,7 @@ Multiple accounts are isolated in separate directories and selected with
 
 **Revoking access:** these are OAuth tokens against your own Azure app
 registration. Revoke sessions in Entra ID (Azure AD) to cut access immediately.
-Deleting `~/.dbhq/outlook-graph` removes the local copy but does not revoke the
+Deleting `~/.dbhq/outlook` removes the local copy but does not revoke the
 grant - do both.
 
 ### Scope of access
@@ -58,15 +58,15 @@ delegated over application permissions.
 
 ### On disk
 
-- Installs into `~/.claude/skills/outlook-graph` or `~/.codex`
-- Reads and writes `~/.dbhq/outlook-graph/` only
+- Installs into `~/.claude/skills/outlook` or `~/.codex`
+- Reads and writes `~/.dbhq/outlook/` only
 - `outlook-to-md` processes PST files **entirely locally** - a PST is never
   uploaded anywhere
 
 ### On the "sensitive file access" findings
 
 Automated scanners flag the lines in `SKILL.md` that name
-`~/.dbhq/outlook-graph/<account>/` as "access to home directory dotfiles". Those are
+`~/.dbhq/outlook/<account>/` as "access to home directory dotfiles". Those are
 sentences of documentation, not code - they describe where credentials live so
 you can find, inspect and delete them.
 
@@ -77,11 +77,11 @@ to audit. The paths stay in the documentation.
 
 ## Note for automated scanners
 
-`skills/outlook-graph/tests/helpers_test.sh` uses `eval "$(extract_fn <name>)"`,
+`skills/outlook/tests/helpers_test.sh` uses `eval "$(extract_fn <name>)"`,
 which static analysis flags as command injection. It is not.
 
 The harness extracts individual named functions out of
-`outlook-graph-mail.sh` with `awk` and evaluates only those, so the pure logic
+`outlook-mail.sh` with `awk` and evaluates only those, so the pure logic
 helpers can be unit-tested offline without a Microsoft account or a network. The
 alternative - sourcing the script - would execute 2,500 lines of top-level
 config loading and credential checks and fail without a configured mailbox.

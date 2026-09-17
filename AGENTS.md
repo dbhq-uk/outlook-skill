@@ -11,9 +11,9 @@ The **Outlook** skill for AI coding agents - Microsoft 365 email and calendar vi
 ```
 .claude-plugin/plugin.json        # plugin manifest
 .github/workflows/validate.yml    # CI: parse, unit tests, frontmatter, py matrix
-skills/outlook-graph/SKILL.md     # the live mail/calendar skill (agent-facing)
-skills/outlook-graph/scripts/     # bash scripts (self-contained: jq + curl + az)
-skills/outlook-graph/references/  # manual setup guide (ships with the skill)
+skills/outlook/SKILL.md     # the live mail/calendar skill (agent-facing)
+skills/outlook/scripts/     # bash scripts (self-contained: jq + curl + az)
+skills/outlook/references/  # manual setup guide (ships with the skill)
 skills/outlook-to-md/SKILL.md     # the offline archive skill (agent-facing)
 skills/outlook-to-md/scripts/     # outlook_to_md.py, run from its own .venv
 docs/                             # human-facing documentation, see docs/README.md
@@ -26,18 +26,18 @@ installed - so a fact needed at runtime belongs in the skill, not only in `docs/
 
 ## Conventions
 
-- Scripts are self-contained: they read credentials from `~/.dbhq/outlook-graph/<account>/` and have no bundled-path dependencies, so they run from any location.
+- Scripts are self-contained: they read credentials from `~/.dbhq/outlook/<account>/` and have no bundled-path dependencies, so they run from any location.
 - SKILL.md references scripts via `${CLAUDE_SKILL_DIR}` (the skill's own directory), which Claude Code substitutes for personal, project, and plugin installs alike. `install.sh` therefore symlinks the whole skill directory into `~/.claude/skills/` (no rewrite). `install-codex.sh` still rewrites the variable to the install path, since Codex does not substitute it.
 - Shell scripts use `set -e`; errors go to stderr, structured output to stdout.
-- No secrets in the repo - credentials live under `~/.dbhq/outlook-graph/`.
+- No secrets in the repo - credentials live under `~/.dbhq/outlook/`.
 - House style: British English, plain hyphens.
 
 ## Validating a change
 
 ```bash
-bash -n skills/outlook-graph/scripts/*.sh    # scripts parse
-shellcheck skills/outlook-graph/scripts/*.sh # lint (warnings should be clean)
-bash skills/outlook-graph/tests/helpers_test.sh  # offline unit tests (no account needed)
+bash -n skills/outlook/scripts/*.sh    # scripts parse
+shellcheck skills/outlook/scripts/*.sh # lint (warnings should be clean)
+bash skills/outlook/tests/helpers_test.sh  # offline unit tests (no account needed)
 python3 -m pytest skills/outlook-to-md/tests/ -q # archive suite (no PST needed)
 claude plugin validate .                     # manifest + structure
 ```

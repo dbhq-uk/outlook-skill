@@ -1,5 +1,5 @@
 {
-  "name": "outlook-graph",
+  "name": "outlook",
   "description": "A pack of Outlook skills for Claude Code and Codex - Microsoft 365 email and calendar via the Graph API (inbox, search, threads, drafts, reply-all-safe replies, forwards, flags and categories, attachments up to 150 MB, calendar with invites and responses), plus PST and live-mail extraction into integrity-verified markdown archives that stay current.",
   "version": "1.3.0",
   "author": {
@@ -7,7 +7,7 @@
     "email": "dan@dbhq.uk"
   },
   "homepage": "https://dbhq.uk",
-  "repository": "https://github.com/dbhq-uk/outlook-graph-skill",
+  "repository": "https://github.com/dbhq-uk/outlook-skill",
   "license": "MIT",
   "keywords": [
     "outlook",
