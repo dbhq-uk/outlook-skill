@@ -34,7 +34,7 @@ were handed in a box - and they join up, so one archive spans both. `outlook-to-
 needs no credentials and makes no network calls; it reads files on disk, whether they came out
 of a PST or out of `outlook`.
 
-## Why it is different
+## What makes it different
 
 **Reply-all by default.** Replies preserve every original `To:` and `Cc:` recipient, so you
 never silently drop someone from a thread. Trim to sender-only when you actually mean to.
@@ -172,6 +172,6 @@ all documented at **[skills.dbhq.uk](https://skills.dbhq.uk)**.
 
 Plus [heliograph](https://skills.dbhq.uk/heliograph/), for a machine you cannot log into.
 
-## License
+## Licence
 
 [MIT](LICENSE) © 2026 DBHQ Consulting Ltd
