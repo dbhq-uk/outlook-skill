@@ -151,9 +151,10 @@ and used only to talk to Microsoft Graph directly from your machine.
 
 ## Also from DBHQ
 
-Sixteen free agent skills, all of them installable from the same marketplace and
-all documented at **[skills.dbhq.uk](https://skills.dbhq.uk)**. The marketplace
-itself is [dbhq-uk/marketplace](https://github.com/dbhq-uk/marketplace) - one
+Every DBHQ agent skill is free, open source and installable from the same
+marketplace, and all of them are documented at
+**[skills.dbhq.uk](https://skills.dbhq.uk)**. The marketplace itself is
+[dbhq-uk/marketplace](https://github.com/dbhq-uk/marketplace) - one
 `/plugin marketplace add` and every one of them is available.
 
 | Skill | What it does |
