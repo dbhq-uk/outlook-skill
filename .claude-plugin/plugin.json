@@ -1,7 +1,6 @@
 {
   "name": "outlook",
   "description": "A pack of Outlook skills for Claude Code and Codex - Microsoft 365 email and calendar via the Graph API (inbox, search, threads, drafts, reply-all-safe replies, forwards, flags and categories, attachments up to 150 MB, calendar with invites and responses), plus PST and live-mail extraction into integrity-verified markdown archives that stay current.",
-  "version": "1.3.0",
   "author": {
     "name": "DBHQ",
     "email": "dan@dbhq.uk"
