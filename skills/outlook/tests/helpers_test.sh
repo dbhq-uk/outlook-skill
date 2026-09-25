@@ -411,6 +411,40 @@ eq "export reports the Graph error message" "1" \
    "$(export_list_messages FID '' 10 2>&1 >/dev/null | grep -c 'nope')"
 
 ########################################
+# category_messages: the `category <name>` listing. The filter must be
+# URL-encoded with OData quote-doubling (a name with an apostrophe must not end
+# the string literal early), pages must be followed, and the result must be the
+# NEWEST matches, sorted client-side because Graph refuses $orderby here.
+########################################
+eval "$(extract_fn category_messages)"
+CATEGORY_SCAN_MAX=1000
+api_call() {
+    local endpoint="$2"; printf '%s\n' "$endpoint" >> /tmp/outlook_test_last_url
+    if [[ "$endpoint" == *skiptoken* ]]; then
+        echo '{"value":[{"id":"c3","receivedDateTime":"2026-09-20T00:00:00Z"}]}'
+    else
+        echo '{"@odata.nextLink":"'"$GRAPH_URL"'/me/messages?$skiptoken=P2","value":[{"id":"c1","receivedDateTime":"2026-09-01T00:00:00Z"},{"id":"c2","receivedDateTime":"2026-09-10T00:00:00Z"}]}'
+    fi
+}
+: > /tmp/outlook_test_last_url
+out=$(category_messages 'Action - DBHQ' 2)
+eq "category follows nextLink" "2" "$(wc -l < /tmp/outlook_test_last_url | tr -d ' ')"
+eq "category returns the newest, sorted client-side" "c3,c2" "$(printf '%s' "$out" | jq -r '[.value[].id]|join(",")')"
+eq "category reports the total found" "3" "$(printf '%s' "$out" | jq '.total')"
+eq "category filter is encoded" \
+   '/me/messages?$filter=categories%2Fany%28c%3Ac%20eq%20%27Action%20-%20DBHQ%27%29&$top=100&$select=id,subject,from,receivedDateTime,isRead,bodyPreview,categories' \
+   "$(head -1 /tmp/outlook_test_last_url)"
+: > /tmp/outlook_test_last_url
+category_messages "Dan's list" 5 >/dev/null
+eq "category doubles a single quote for OData" "1" \
+   "$(head -1 /tmp/outlook_test_last_url | grep -c "eq%20%27Dan%27%27s%20list%27%29")"
+CATEGORY_SCAN_MAX=2
+eq "category stops scanning at the cap and says so" "true" "$(category_messages 'X' 10 | jq '.capped')"
+CATEGORY_SCAN_MAX=1000
+api_call() { echo '{"error":{"code":"BadRequest","message":"nope"}}'; }
+eq "category propagates a Graph error" "nope" "$(category_messages 'X' 5 | jq -r '.error.message')"
+
+########################################
 # category_colour_to_preset: Graph stores colours as opaque presetN values.
 # Both a friendly name and a raw preset are accepted, because presetN means
 # nothing to a reader and a name cannot reach a preset Microsoft adds later.
@@ -537,6 +571,9 @@ curl() {
             ;;
         *'$select=categories'*)
             cat "$CLI_CURRENTCATS"
+            ;;
+        *'categories%2Fany'*)
+            printf '%s' '{"value":[{"id":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAoldermessage01","receivedDateTime":"2026-09-01T09:00:00Z","subject":"Older","from":{"emailAddress":{"address":"a@example.com"}}},{"id":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAnewermessage02","receivedDateTime":"2026-09-20T09:00:00Z","subject":"Newer","from":{"emailAddress":{"address":"b@example.com"}}}]}'
             ;;
         *'/me/messages/'*)
             if [ "$method" = "PATCH" ] && [ -n "$data" ]; then
@@ -695,6 +732,26 @@ printf '%s' '{"id":"CAT1","displayName":"Follow up","color":"preset0"}' > "$CLI_
 run_and_capture rccategory "Follow up" darkblue
 eq "rccategory reports the server's actual colour, not the requested one" \
     "Category recoloured: Follow up (preset0)" "$CLI_OUT"
+
+########################################
+# `category <name>` end to end: newest first, with short IDs, and a note when
+# there are more than the count asked for.
+########################################
+: > "$CLI_LOG"
+run_and_capture category "Action - DBHQ" 1
+eq "category verb exits 0" "0" "$CLI_RC"
+if contains "$CLI_OUT" "[1] AAAAAAnewermessage02 | 2026-09-20 | b@example.com | Newer"; then
+    eq "category verb lists the newest match with a short ID" ok ok
+else
+    eq "category verb lists the newest match with a short ID" "[1] AAAAAAnewermessage02 | 2026-09-20 | b@example.com | Newer" "$CLI_OUT"
+fi
+if contains "$CLI_OUT" "Showing 1 of 2"; then
+    eq "category verb says there are more" ok ok
+else
+    eq "category verb says there are more" "mentions Showing 1 of 2" "$CLI_OUT"
+fi
+run_and_capture category
+eq "category verb with no name prints usage and exits 1" "1" "$CLI_RC"
 
 unset -f curl
 rm -rf "$CLI_TMP"

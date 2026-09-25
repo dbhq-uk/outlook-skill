@@ -104,7 +104,13 @@ case "$1" in
             exit 1
         fi
 
-        jq -r '.access_token' "$CREDS_FILE"
+        # Goes through the same check as every other command: a token that is
+        # expired or within 60 seconds of expiry is refreshed first, so a
+        # hand-written Graph call made with it does not fail with 401. Nothing
+        # but the token reaches stdout, so T=$(outlook-token.sh get) stays clean.
+        if ! ensure_valid_token; then
+            exit 1
+        fi
         ;;
 
     test)
@@ -113,7 +119,11 @@ case "$1" in
             exit 1
         fi
 
-        ACCESS_TOKEN=$(jq -r '.access_token' "$CREDS_FILE")
+        # Refresh first if needed, as a real command would, so an expired
+        # token is not reported as a broken connection.
+        if ! ACCESS_TOKEN=$(ensure_valid_token); then
+            exit 1
+        fi
 
         echo "Testing connection..."
 
@@ -168,7 +178,7 @@ case "$1" in
         echo
         echo "Commands:"
         echo "  refresh    Refresh the access token"
-        echo "  get        Output current access token"
+        echo "  get        Print a valid access token (refreshed first if needed)"
         echo "  test       Test connection to Outlook"
         echo "  status     Show connection status"
         echo "  list       List configured accounts"

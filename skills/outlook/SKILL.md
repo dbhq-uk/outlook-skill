@@ -134,6 +134,10 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search 'from:acme.com AND body:renew
 # Messages flagged for follow-up (newest first)
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh flagged
 
+# Messages carrying a category, in any folder (newest first, with short IDs)
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh category "Follow up"
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh category "Follow up" 50
+
 # The whole conversation a message belongs to (oldest first) - use this to see
 # a full back-and-forth thread across inbox and sent items
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh thread <message-id>

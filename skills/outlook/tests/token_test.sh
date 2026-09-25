@@ -53,6 +53,7 @@ case "$url" in
       ok_norefresh) printf '{"token_type":"Bearer","access_token":"new-access","expires_in":"3599"}'; exit 0 ;;
     esac
     ;;
+  https://graph.microsoft.com/*/mailFolders/inbox) printf '{"totalItemCount":3,"unreadItemCount":1}'; exit 0 ;;
   https://graph.microsoft.com/*) printf '{"value":[]}'; exit 0 ;;
 esac
 exit 0
@@ -248,6 +249,35 @@ write_creds 0
 FAKE_CURL_MODE=html502 run_cli bash "$SCRIPTS/outlook-calendar.sh" today >/dev/null 2>&1; rc=$?
 eq "calendar.sh with a failed refresh exits non-zero" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
 eq "calendar.sh with a failed refresh leaves the file unchanged" "unchanged" "$(unchanged)"
+
+# `get` refreshes a stale token before printing it. It used to print whatever
+# was stored, so a hand-written Graph call made with it failed with 401.
+write_creds 0; : > "$FAKE_CURL_LOG"
+out=$(FAKE_CURL_MODE=ok run_cli bash "$SCRIPTS/outlook-token.sh" get 2>/dev/null); rc=$?
+eq "token.sh get with an expired token exits 0" "0" "$rc"
+eq "token.sh get with an expired token prints a refreshed token" "new-access" "$out"
+eq "token.sh get with an expired token makes one refresh request" "1" "$(calls)"
+eq "token.sh get with an expired token stores the refreshed token" "new-access" "$(jq -r .access_token "$CREDS_FILE")"
+
+write_creds $(( $(command date +%s) + 30 )); : > "$FAKE_CURL_LOG"
+eq "token.sh get within the 60s margin refreshes" "new-access" \
+   "$(FAKE_CURL_MODE=ok run_cli bash "$SCRIPTS/outlook-token.sh" get 2>/dev/null)"
+
+write_creds $(( $(command date +%s) + 3600 )); : > "$FAKE_CURL_LOG"
+eq "token.sh get with a fresh token prints it" "old-access" \
+   "$(FAKE_CURL_MODE=ok run_cli bash "$SCRIPTS/outlook-token.sh" get 2>/dev/null)"
+eq "token.sh get with a fresh token makes no request" "0" "$(calls)"
+
+write_creds 0
+out=$(FAKE_CURL_MODE=exit6 run_cli bash "$SCRIPTS/outlook-token.sh" get 2>/dev/null); rc=$?
+eq "token.sh get with a failed refresh exits non-zero" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
+eq "token.sh get with a failed refresh prints no token" "" "$out"
+
+write_creds 0; : > "$FAKE_CURL_LOG"
+out=$(FAKE_CURL_MODE=ok run_cli bash "$SCRIPTS/outlook-token.sh" test 2>&1); rc=$?
+eq "token.sh test refreshes an expired token instead of failing" "0" "$rc"
+eq "token.sh test calls Graph with the refreshed token" "1" \
+   "$(grep -c '^Authorization: Bearer new-access$' "$FAKE_CURL_LOG")"
 
 # The library is found through a symlink to the script itself, not only through
 # a symlinked skill directory.

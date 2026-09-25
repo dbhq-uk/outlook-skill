@@ -180,6 +180,13 @@ Prefer `--add` and `--remove` to the comma-separated form. The bare form *replac
 category on the message, which quietly discards labels someone else's rule or another agent
 put there. Use the replacing form only when that is what you mean.
 
+To list the messages that carry a category, in any folder:
+
+```bash
+mail.sh category "Follow up"              # newest 10, with short IDs
+mail.sh category "Follow up" 50
+```
+
 Master categories are separate from what is on a message:
 
 ```bash
