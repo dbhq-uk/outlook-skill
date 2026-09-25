@@ -288,10 +288,21 @@ eq "folder path Inbox/Projects/Acme" "A1" "$(resolve_folder_id 'Inbox/Projects/A
 eq "folder not found -> rc1"     "1"  "$(resolve_folder_id 'Nope' >/dev/null; echo $?)"
 # The regression that matters: a same-named ghost in the bin must never win.
 eq "bare name skips Deleted Items ghost" "PR" "$(resolve_folder_id 'Projects')"
+# The mailbox for the next two: the only "Old Project" is in the bin. Defined
+# here rather than inside $(...), because bash 3.2 (macOS) cannot parse a
+# case statement's ")" inside a command substitution.
+ghost_only_api() {
+    case "$2" in
+        "/me/mailFolders?\$top=200") echo '{"value":[{"displayName":"Deleted Items","id":"DI"},{"displayName":"Inbox","id":"IB"}]}' ;;
+        "/me/mailFolders/DI/childFolders?\$top=200") echo '{"value":[{"displayName":"Old Project","id":"GHOST"}]}' ;;
+        "/me/mailFolders/deleteditems?\$select=id") echo '{"id":"DI"}' ;;
+        *) echo '{"value":[]}' ;;
+    esac
+}
 eq "bare name skips bin even when only match" "1" \
-   "$(api_call() { case "$2" in "/me/mailFolders?\$top=200") echo '{"value":[{"displayName":"Deleted Items","id":"DI"},{"displayName":"Inbox","id":"IB"}]}';; "/me/mailFolders/DI/childFolders?\$top=200") echo '{"value":[{"displayName":"Old Project","id":"GHOST"}]}';; "/me/mailFolders/deleteditems?\$select=id") echo '{"id":"DI"}';; *) echo '{"value":[]}';; esac; }; resolve_folder_id 'Old Project' >/dev/null; echo $?)"
+   "$(api_call() { ghost_only_api "$@"; }; resolve_folder_id 'Old Project' >/dev/null; echo $?)"
 eq "explicit bin path still resolves" "GHOST" \
-   "$(api_call() { case "$2" in "/me/mailFolders?\$top=200") echo '{"value":[{"displayName":"Deleted Items","id":"DI"},{"displayName":"Inbox","id":"IB"}]}';; "/me/mailFolders/DI/childFolders?\$top=200") echo '{"value":[{"displayName":"Old Project","id":"GHOST"}]}';; "/me/mailFolders/deleteditems?\$select=id") echo '{"id":"DI"}';; *) echo '{"value":[]}';; esac; }; resolve_folder_id 'Deleted Items/Old Project')"
+   "$(api_call() { ghost_only_api "$@"; }; resolve_folder_id 'Deleted Items/Old Project')"
 
 # The token-expiry decision and the refresh itself live in scripts/lib/graph.sh
 # and are tested against the real functions in token_test.sh.
@@ -392,7 +403,7 @@ api_call() {
 eq "sendable_addresses primary first, then aliases" \
    "dan@example.com,alias1@example.com,alias2@other.co.uk" \
    "$(sendable_addresses | paste -sd, -)"
-eq "sendable_addresses drops X500/sip entries" "3" "$(sendable_addresses | wc -l)"
+eq "sendable_addresses drops X500/sip entries" "3" "$(sendable_addresses | wc -l | tr -d ' ')"
 eq "address_in_list matches alias" "0" \
    "$(sendable_addresses | address_in_list 'alias2@other.co.uk'; echo $?)"
 eq "address_in_list is case-insensitive" "0" \
