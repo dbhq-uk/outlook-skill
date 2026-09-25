@@ -99,9 +99,10 @@ shell out to `pandoc`. Install it.
 **Calendar times an hour out.** Set `OUTLOOK_TZ` - see [running the
 calendar](calendar.md#fix-the-timezone-first).
 
-**A short ID that will not resolve.** Short IDs are cached by whichever listing produced them,
-and a message that has been moved has a **new** ID in its new folder. Re-list from where the
-message is now.
+**A short ID that will not resolve.** Short IDs are cached by whichever listing produced them.
+A short ID printed by a version of the skill from before immutable IDs (see
+[architecture](../architecture.md#short-ids)) may not match any more. List the folder again
+and use the new ID.
 
 ## What is stored, and where
 

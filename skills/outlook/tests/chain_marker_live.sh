@@ -54,7 +54,7 @@ if ! TOKEN=$(bash "$SCRIPTS/outlook-token.sh" get); then
 fi
 
 graph() {  # graph <METHOD> <path> [json-body]
-    local args=(-s --connect-timeout 10 --max-time 60 -X "$1" -H "Authorization: Bearer $TOKEN")
+    local args=(-s --connect-timeout 10 --max-time 60 -X "$1" -H "Authorization: Bearer $TOKEN" -H "$OUTLOOK_PREFER_IDS")
     [ $# -ge 3 ] && args+=(-H "Content-Type: application/json" -d "$3")
     curl "${args[@]}" "https://graph.microsoft.com/v1.0$2"
 }

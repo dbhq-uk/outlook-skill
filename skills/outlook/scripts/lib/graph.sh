@@ -265,11 +265,21 @@ outlook_retry_wait() {
     printf '%s\n' "$wait"
 }
 
+# --- Immutable IDs ----------------------------------------------------------------
+# Graph's default message and event IDs change when an item moves to another
+# folder, Deleted Items included, so an ID from a listing stopped working after
+# a move and the user had to list the new folder again. With this header Graph
+# returns immutable IDs instead, which keep their value for as long as the item
+# stays in the mailbox. It applies only to the request it is sent with, so it
+# goes on every request, here. Folder IDs never changed and are unaffected.
+# See https://learn.microsoft.com/en-us/graph/outlook-immutable-id.
+OUTLOOK_PREFER_IDS='Prefer: IdType="ImmutableId"'
+
 # outlook_curl <method> <curl arguments...>
 # Runs curl with the timeouts, retries as above, and prints the body of the
 # last attempt. Returns curl's exit status. The caller passes everything but
-# the timeouts, including -X, so the method is given twice: once here, for the
-# retry rule, and once to curl.
+# the timeouts and the immutable-ID header, including -X, so the method is
+# given twice: once here, for the retry rule, and once to curl.
 #
 # OUTLOOK_CURL_MAX_TIME, set for one call, replaces the normal --max-time.
 #
@@ -283,13 +293,14 @@ outlook_curl() {
     local max_time="${OUTLOOK_CURL_MAX_TIME:-$OUTLOOK_MAX_TIME}"
 
     if ! hdr=$(mktemp "${TMPDIR:-/tmp}/outlook-headers.XXXXXX" 2>/dev/null); then
-        curl -s --connect-timeout "$OUTLOOK_CONNECT_TIMEOUT" --max-time "$max_time" "$@"
+        curl -s --connect-timeout "$OUTLOOK_CONNECT_TIMEOUT" --max-time "$max_time" \
+             -H "$OUTLOOK_PREFER_IDS" "$@"
         return
     fi
     while :; do
         : > "$hdr"
         body=$(curl -s --connect-timeout "$OUTLOOK_CONNECT_TIMEOUT" --max-time "$max_time" \
-                    -D "$hdr" "$@") && rc=0 || rc=$?
+                    -H "$OUTLOOK_PREFER_IDS" -D "$hdr" "$@") && rc=0 || rc=$?
         status=$(_outlook_http_status "$hdr")
         if [ "$attempt" -lt "$OUTLOOK_MAX_RETRIES" ] && outlook_should_retry "$method" "$status"; then
             after=$(awk 'tolower($1) == "retry-after:" {v=$2} END{print v}' "$hdr" | tr -d '\r')

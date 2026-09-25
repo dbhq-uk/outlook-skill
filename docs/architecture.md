@@ -127,12 +127,19 @@ either form. Every listing writes the short-to-full mapping into `id_cache.json`
 common list-then-act flow resolves from cache with no extra API call. On a miss the resolver
 cascades through the folders a message might be in.
 
-The cost is a rule you have to know: **moving a message gives it a new ID**. That comes from
-a choice made here. The skill uses Graph's default IDs, which change when a message changes
-folder. Graph can return immutable IDs instead, through the `Prefer: IdType="ImmutableId"`
-header, and those survive a move; the skill does not ask for them today. The short-ID cache
-makes the rule easy to forget. Re-list from the destination before acting on a message you
-have just moved.
+Every request asks Graph for immutable IDs, with the `Prefer: IdType="ImmutableId"` header
+that `outlook_curl` in `lib/graph.sh` adds, and each request inside a `batch-move` `$batch`
+carries it too. Graph's default IDs change when a message changes folder, Deleted Items
+included, so an ID from a listing used to stop working after a move and the rule was to list
+the destination again. Immutable IDs keep their value while the item stays in the mailbox. They
+change only if it goes to an archive mailbox or is exported and imported again. The header
+applies only to the request it is sent with, which is why it lives in the one function every
+request goes through. See [Microsoft's
+guide](https://learn.microsoft.com/en-us/graph/outlook-immutable-id).
+
+The switch was made on 25 Sep 2026. A short ID from an older listing is the tail of a default
+ID, so once a new listing has replaced the cache it matches nothing. List again. `graph_test.sh` checks the header on every request, and
+`tests/move_id_live.sh` checks against a real mailbox that a moved message keeps its ID.
 
 ## Email HTML that survives Outlook
 

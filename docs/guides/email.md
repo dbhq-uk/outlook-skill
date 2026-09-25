@@ -188,9 +188,8 @@ mail.sh folder "Newsletters" 200 | awk '/^\[/ {print $2}' | mail.sh batch-move "
 Listing rows are `[n] <short-id> | date | from | subject`, so the short ID is the second
 whitespace-separated field of any line starting with `[`.
 
-One thing to watch when reorganising in bulk: **moving a message gives it a new ID in the
-destination folder**. If you need to move it again, re-list from where it now lives rather
-than reusing the ID you had.
+Moving a message does not change its ID, so the IDs from one listing still work after a move.
+You can move a message twice without listing its new folder in between.
 
 ## A session that only reads
 

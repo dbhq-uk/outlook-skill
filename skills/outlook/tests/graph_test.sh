@@ -28,15 +28,17 @@ trap 'rm -rf "$TMP"' EXIT
 # --- Fake curl -----------------------------------------------------------------
 # The Nth call with method M answers from $FAKE_DIR/M.N, else $FAKE_DIR/M.default.
 # A response file is a status line, any header lines, a blank line, then the
-# body. Each call is logged as "METHOD URL max-time=<value or none>", then the
+# body. Each call is logged as "METHOD URL ids=<immutable or default>
+# max-time=<value or none>", then the
 # request body on a "BODY " line if there is one. With -f and a status of 400
 # or more it writes no body and exits 22, as curl does.
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/curl" <<'FAKE'
 #!/bin/bash
-url="" method=GET data="" prev="" hdr="" out="" fail=0 maxtime=none
+url="" method=GET data="" prev="" hdr="" out="" fail=0 maxtime=none ids=default
 for a in "$@"; do
   case "$prev" in
+    -H) [ "$a" = 'Prefer: IdType="ImmutableId"' ] && ids=immutable ;;
     -X) method="$a" ;;
     -d|--data-binary) data="$a" ;;
     -D) hdr="$a" ;;
@@ -56,7 +58,7 @@ if [ "$data" = "@-" ]; then
   prev=""; for a in "$@"; do [ "$prev" = "-H" ] && case "$a" in Content-Range:*) printf 'RANGE %s\n' "${a#Content-Range: }" >> "$FAKE_CURL_LOG" ;; esac; prev="$a"; done
 fi
 case "$data" in @*) data=$(cat "${data#@}") ;; esac
-printf '%s %s max-time=%s\n' "$method" "$url" "$maxtime" >> "$FAKE_CURL_LOG"
+printf '%s %s ids=%s max-time=%s\n' "$method" "$url" "$ids" "$maxtime" >> "$FAKE_CURL_LOG"
 [ -n "$data" ] && printf 'BODY %s\n' "$(printf '%s' "$data" | jq -c . 2>/dev/null || printf '%s' "$data")" >> "$FAKE_CURL_LOG"
 
 resp="$FAKE_DIR/$method.$n"
@@ -268,6 +270,32 @@ run "$MAIL" batch-move archive "$ID0"
 run "$CAL" calendars
 eq "every request the scripts made had --max-time" "0" "$(grep -c 'max-time=none' "$FAKE_CURL_LOG" || true)"
 eq "and there were requests to check" "1" "$([ "$(grep -c ' max-time=' "$FAKE_CURL_LOG")" -ge 3 ] && echo 1 || echo 0)"
+
+########################################
+# Every Graph request asks for immutable IDs.
+########################################
+# Graph's default IDs change when a message moves, Deleted Items included, so
+# an ID from a listing stopped working after a move. The header applies only
+# to the request it is sent with, so every request needs it: mail and
+# calendar, reads and writes, downloads, and each request inside a $batch.
+scenario immutable
+respond GET default 200 "{\"id\":\"ARCH\",\"value\":[{\"id\":\"$ID0\",\"receivedDateTime\":\"2026-09-01T10:00:00Z\",\"subject\":\"s\",\"from\":{\"emailAddress\":{\"address\":\"a@example.com\"}}}]}"
+respond POST default 200 '{"id":"MOVED","responses":[{"id":"0","status":201,"body":{}}]}'
+run "$MAIL" inbox
+run "$MAIL" read "$ID0"
+run "$MAIL" move "$ID0" archive
+run "$MAIL" batch-move archive "$ID0" "$ID1"
+run "$MAIL" export archive "$TMP/export"
+run "$CAL" calendars
+graph_calls=$(grep -c '^[A-Z]* https://graph.microsoft.com/' "$FAKE_CURL_LOG" || true)
+eq "the scenario made Graph requests to check" "1" "$([ "$graph_calls" -ge 8 ] && echo 1 || echo 0)"
+eq "every Graph request sent Prefer: IdType=\"ImmutableId\"" "" \
+   "$(grep '^[A-Z]* https://graph.microsoft.com/' "$FAKE_CURL_LOG" | grep -v ' ids=immutable ' || true)"
+eq "the export's MIME download asked for immutable IDs" "1" \
+   "$([ "$(grep -c '^GET .*/\$value ids=immutable ' "$FAKE_CURL_LOG")" -ge 1 ] && echo 1 || echo 0)"
+eq "every request inside the \$batch asks for immutable IDs" "IdType=\"ImmutableId\" IdType=\"ImmutableId\"" \
+   "$(grep -A1 '^POST https://graph.microsoft.com/v1.0/\$batch ' "$FAKE_CURL_LOG" | sed -n 's/^BODY //p' \
+      | jq -r '[.requests[].headers.Prefer] | join(" ")')"
 
 # And every curl command written in the scripts carries --connect-timeout and
 # --max-time. Continuation lines are joined first, so a flag on the next line
