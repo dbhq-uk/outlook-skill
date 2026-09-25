@@ -1,4 +1,3 @@
-libratom>=0.7.1
 html2text>=2025.4.15
 python-dateutil
 tqdm

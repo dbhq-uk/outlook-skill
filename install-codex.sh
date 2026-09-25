@@ -30,7 +30,7 @@ missing_for() {
 }
 
 command -v pandoc  >/dev/null 2>&1 || echo "Optional: pandoc not found (needed for markdown-formatted emails)."
-command -v readpst >/dev/null 2>&1 || echo "Optional: readpst not found (pst-utils; fallback PST backend if libratom fails)."
+command -v readpst >/dev/null 2>&1 || echo "Optional: readpst not found (pst-utils; needed to read .pst files, not for live-mail archives)."
 echo
 
 # pst-to-markdown became outlook-to-md once it also ingested live mail, and

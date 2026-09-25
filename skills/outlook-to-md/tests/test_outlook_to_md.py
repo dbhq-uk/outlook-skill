@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 """Tests for outlook_to_md.py.
 
-Scope limit, deliberate: this covers the pure helpers and the append-mode index
-loading, not the libratom/readpst extraction drivers. Those need a real PST
-fixture, which the repo does not carry and which is not worth generating for the
-value it would add -- the drivers are thin loops over a third-party parser, while
-the filename and header handling below is where the repo's own bugs would live.
-
-libratom is an optional guarded import in the module, so this suite runs whether
-or not it is installed.
+This covers the pure helpers, the append-mode index loading, and the PST path
+up to the readpst call: the command line it builds, and what comes out when
+readpst leaves its usual tree of .eml files. readpst itself is stubbed, so the
+suite needs no PST and no pst-utils. CI converts a real PST end to end in a
+separate job.
 """
 
 from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -376,14 +375,9 @@ class TestAppendModeIndexLoading(unittest.TestCase):
 
 
 class TestDirectoryDispatch(unittest.TestCase):
-    """A directory input must reach directory mode whatever backends exist.
+    """A directory input goes straight to directory mode and never runs readpst."""
 
-    The directory branch used to sit inside the readpst path, reachable only
-    when readpst was ALSO missing - so with libratom installed (what setup.sh
-    aims for) a directory was handed to PffArchive and raised OSError.
-    """
-
-    def test_directory_input_bypasses_libratom(self):
+    def test_directory_input_skips_readpst(self):
         with tempfile.TemporaryDirectory() as tmp:
             staging = Path(tmp) / "staging"
             staging.mkdir()
@@ -392,21 +386,168 @@ class TestDirectoryDispatch(unittest.TestCase):
 
             extractor = outlook_to_md.EmailExtractor(pst_path=staging, output_dir=out)
 
-            called = {"dir": False, "libratom": False}
+            called = {"dir": False, "readpst": False}
 
             def fake_dir(path):
                 called["dir"] = True
 
-            def fake_libratom():
-                called["libratom"] = True
+            def fake_readpst():
+                called["readpst"] = True
 
             with patch.object(extractor, "_process_eml_directory", fake_dir), patch.object(
-                extractor, "_extract_with_libratom", fake_libratom
-            ), patch.object(outlook_to_md, "USE_LIBRATOM", True):
+                extractor, "_extract_with_readpst", fake_readpst
+            ):
                 extractor.extract()
 
             self.assertTrue(called["dir"], "directory input did not reach directory mode")
-            self.assertFalse(called["libratom"], "directory input was sent to libratom")
+            self.assertFalse(called["readpst"], "directory input was sent to readpst")
+
+
+# What readpst -e leaves behind: one .eml per message, in a folder tree that
+# mirrors the PST, numbered from 1 within each folder.
+READPST_TREE = {
+    "Personal folders/Inbox/1.eml": (
+        "Message-ID: <in-1@example.com>\n"
+        "Date: Tue, 01 Sep 2026 09:00:00 +0000\n"
+        "From: Alice Example <alice@example.com>\n"
+        "To: Bob Example <bob@example.com>\n"
+        "Subject: Plain inbox message\n"
+        "Content-Type: text/plain; charset=utf-8\n\n"
+        "Hello Bob.\n"
+    ),
+    "Personal folders/Inbox/2.eml": (
+        "Message-ID: <in-2@example.com>\n"
+        "Date: Wed, 02 Sep 2026 10:00:00 +0000\n"
+        "From: Carol Example <carol@example.com>\n"
+        "To: Bob Example <bob@example.com>\n"
+        "Subject: With an attachment\n"
+        "MIME-Version: 1.0\n"
+        'Content-Type: multipart/mixed; boundary="XYZ"\n\n'
+        "--XYZ\n"
+        "Content-Type: text/plain; charset=utf-8\n\n"
+        "See attached.\n"
+        "--XYZ\n"
+        'Content-Type: text/plain; name="notes.txt"\n'
+        'Content-Disposition: attachment; filename="notes.txt"\n'
+        "Content-Transfer-Encoding: base64\n\n"
+        "YXR0YWNobWVudCBib2R5\n"
+        "--XYZ--\n"
+    ),
+    "Personal folders/Sent Items/1.eml": (
+        "Message-ID: <sent-1@example.com>\n"
+        "Date: Thu, 03 Sep 2026 11:00:00 +0000\n"
+        "From: Bob Example <bob@example.com>\n"
+        "To: Alice Example <alice@example.com>\n"
+        "Subject: Reply from sent items\n"
+        "Content-Type: text/plain; charset=utf-8\n\n"
+        "Thanks.\n"
+    ),
+}
+
+
+class TestReadpstBackend(unittest.TestCase):
+    """readpst is the only PST reader. Pin its command line and its hand-off."""
+
+    def extractor(self, tmp, **kwargs):
+        pst = Path(tmp) / "mailbox.pst"
+        pst.write_bytes(b"stand-in PST bytes")
+        return outlook_to_md.EmailExtractor(pst_path=pst, output_dir=Path(tmp) / "out", **kwargs), pst
+
+    def test_command_without_include_deleted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ex, pst = self.extractor(tmp)
+            self.assertEqual(
+                ex.readpst_command(Path("/staging")),
+                ["readpst", "-e", "-8", "-o", "/staging", str(pst)],
+            )
+
+    def test_command_with_include_deleted_adds_D(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ex, pst = self.extractor(tmp, include_deleted=True)
+            self.assertEqual(
+                ex.readpst_command(Path("/staging")),
+                ["readpst", "-e", "-8", "-D", "-o", "/staging", str(pst)],
+            )
+
+    def run_pst(self, tmp, **kwargs):
+        """Run extract() on a .pst with readpst stubbed to write READPST_TREE."""
+        ex, _ = self.extractor(tmp, **kwargs)
+        calls = []
+
+        def fake_run(cmd, **_):
+            calls.append(list(cmd))
+            out_dir = Path(cmd[cmd.index("-o") + 1])
+            for rel, text in READPST_TREE.items():
+                path = out_dir / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text)
+
+            class Result:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+
+            return Result()
+
+        with patch.object(outlook_to_md.shutil, "which", lambda name: "/usr/bin/readpst"), patch.object(
+            outlook_to_md.subprocess, "run", fake_run
+        ), redirect_stdout(io.StringIO()):
+            ex.extract()
+        return ex, calls
+
+    def test_pst_goes_through_readpst_and_comes_out_whole(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ex, calls = self.run_pst(tmp)
+            self.assertEqual(len(calls), 1, "readpst was not run exactly once")
+            self.assertEqual(calls[0][:3], ["readpst", "-e", "-8"])
+            self.assertNotIn("-D", calls[0])
+
+            out = Path(tmp) / "out"
+            with open(out / "index.csv", newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(ex.stats["errors"], 0)
+            self.assertEqual(
+                sorted(r["message_id"] for r in rows),
+                ["<in-1@example.com>", "<in-2@example.com>", "<sent-1@example.com>"],
+            )
+            folders = {r["message_id"]: r["pst_folder"] for r in rows}
+            self.assertEqual(folders["<in-1@example.com>"], "Personal folders/Inbox")
+            self.assertEqual(folders["<sent-1@example.com>"], "Personal folders/Sent Items")
+
+            with_att = next(r for r in rows if r["message_id"] == "<in-2@example.com>")
+            self.assertEqual(with_att["attachment_count"], "1")
+            saved = list((out / "emails").rglob("attachment_001_notes.txt"))
+            self.assertEqual(len(saved), 1, "the attachment was not written")
+            self.assertEqual(saved[0].read_bytes(), b"attachment body")
+
+    def test_include_deleted_reaches_readpst(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, calls = self.run_pst(tmp, include_deleted=True)
+            self.assertIn("-D", calls[0])
+
+    def test_missing_readpst_stops_with_install_advice(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ex, _ = self.extractor(tmp)
+            buf = io.StringIO()
+            with patch.object(outlook_to_md.shutil, "which", lambda name: None), redirect_stdout(buf):
+                with self.assertRaises(SystemExit):
+                    ex.extract()
+            self.assertIn("pst-utils", buf.getvalue())
+
+    def test_readpst_failure_stops(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ex, _ = self.extractor(tmp)
+
+            class Failed:
+                returncode = 1
+                stdout = ""
+                stderr = "Error opening File"
+
+            with patch.object(outlook_to_md.shutil, "which", lambda name: "/usr/bin/readpst"), patch.object(
+                outlook_to_md.subprocess, "run", lambda cmd, **_: Failed()
+            ), redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    ex.extract()
 
 
 class TestAppendRoundTrip(unittest.TestCase):
@@ -584,20 +725,18 @@ class TestManifestProvenance(unittest.TestCase):
     """
 
     def _extract_stub_backend(self, pst_path, output_dir, **kwargs):
-        """Run extract() with the real PST-parsing backends stubbed out.
+        """Run extract() with the real PST backend stubbed out.
 
         The provenance/manifest logic under test does not depend on what a
         real backend would parse out of pst_path - only on pst_path's own
         identity and hash - so stubbing avoids needing a real PST fixture
         (this suite deliberately carries none, see the module docstring) or
         an installed backend. Directory inputs are unaffected: they never
-        reach these two methods, so append-from-a-directory below exercises
+        reach readpst, so append-from-a-directory below exercises
         the real _process_eml_directory code path.
         """
         extractor = outlook_to_md.EmailExtractor(pst_path=pst_path, output_dir=output_dir, **kwargs)
-        with patch.object(extractor, "_extract_with_libratom", lambda: None), patch.object(
-            extractor, "_extract_with_readpst", lambda: None
-        ):
+        with patch.object(extractor, "_extract_with_readpst", lambda: None):
             extractor.extract()
         return extractor
 
@@ -673,7 +812,7 @@ class TestModuleContract(unittest.TestCase):
     """Guards against the optional-dependency wiring being removed."""
 
     def test_optional_dependency_flags_exist(self):
-        for flag in ("HAS_DATEUTIL", "HAS_TQDM", "HAS_HTML2TEXT", "USE_LIBRATOM"):
+        for flag in ("HAS_DATEUTIL", "HAS_TQDM", "HAS_HTML2TEXT"):
             with self.subTest(flag=flag):
                 self.assertIsInstance(getattr(outlook_to_md, flag), bool)
 

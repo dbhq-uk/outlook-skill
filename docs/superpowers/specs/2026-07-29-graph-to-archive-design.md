@@ -1,6 +1,11 @@
 # Keeping a PST archive current from live mail
 
 **Status:** design, approved 29 July 2026
+
+> **Historical record, shipped July 2026.** It describes a second, Python PST backend that
+> was removed on 25 Sep 2026. `readpst` is now the only PST reader. The code quoted below is the
+> code as it stood then, kept so the record stays accurate. See `docs/architecture.md`.
+
 **Skills touched:** `outlook`, `outlook-to-md`
 
 ## Problem

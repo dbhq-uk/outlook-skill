@@ -39,7 +39,7 @@ it. Ships inside the skill so it is available offline.
 
 **[How the pack is built](architecture.md)** &nbsp; Why there are two skills, what the safety
 rails are and why they are the defaults, the scope deliberately not requested, short IDs,
-email HTML that survives Outlook, and the Python version problem.
+email HTML that survives Outlook, and why there is one PST reader.
 
 ## For contributors
 

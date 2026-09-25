@@ -35,7 +35,7 @@ missing_for() {
 }
 
 command -v pandoc  >/dev/null 2>&1 || echo "Optional: pandoc not found (needed for markdown-formatted emails)."
-command -v readpst >/dev/null 2>&1 || echo "Optional: readpst not found (pst-utils; fallback PST backend if libratom fails)."
+command -v readpst >/dev/null 2>&1 || echo "Optional: readpst not found (pst-utils; needed to read .pst files, not for live-mail archives)."
 echo
 
 # --- Retire skills that have been renamed -----------------------------------
@@ -75,7 +75,7 @@ for src in "$SCRIPT_DIR"/skills/*/; do
   INSTALLED=$((INSTALLED + 1))
 
   # Skills carrying a setup.sh provision their own environment (outlook-to-md
-  # builds a venv for libratom). Non-fatal: the skill is installed either way.
+  # builds its Python venv). Non-fatal: the skill is installed either way.
   if [ -x "$src/setup.sh" ]; then
     echo "  Running $name setup..."
     "$src/setup.sh" || echo "  Setup failed for '$name'; re-run $src/setup.sh when ready."

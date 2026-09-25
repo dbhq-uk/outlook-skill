@@ -1,5 +1,9 @@
 # Keeping a PST archive current from live mail — Implementation Plan
 
+> **Historical record, shipped July 2026.** It describes a second, Python PST backend that
+> was removed on 25 Sep 2026. `readpst` is now the only PST reader. The code quoted below is the
+> code as it stood then, kept so the record stays accurate. See `docs/architecture.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let `outlook` export live mail as `.eml` so `outlook-to-md` can append it to an existing archive in the identical shape.

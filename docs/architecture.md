@@ -148,20 +148,21 @@ mail always carries the header, but some drafts and malformed messages do not, a
 re-archived on every overlapping run. It is a narrow gap and it is documented rather than
 papered over.
 
-## The Python version problem
+## One PST reader
 
-`libratom` is the preferred PST backend. It pins `numpy==1.23.5`, whose newest wheel is cp311
-- so it cannot install on Python 3.12 or later, which is what most current systems ship.
+A `.pst` is read by `readpst` from `pst-utils`, and by nothing else. It writes each message as
+an `.eml` file in a folder tree that mirrors the PST (`readpst -e -8`, plus `-D` when
+`--include-deleted` is given), and that tree goes through the same `.eml` path as a live-mail
+export. So there is one parser for messages, and it is the one the tests cover most.
 
-`setup.sh` handles this rather than failing: it prefers a 3.9 to 3.11 interpreter if one is on
-your `PATH`, and otherwise builds the virtualenv without `libratom` and tells you plainly that
-PST extraction now depends on `readpst`. A directory of `.eml` files needs neither backend and
-is checked before either.
+There used to be a second, Python PST backend, preferred whenever it was installed. It failed on
+every message, its last release was in 2022, and it was the only reason for a Python 3.11
+ceiling and a pinned `setuptools`. It was removed on 25 Sep 2026. The Python side now installs on
+any interpreter from 3.9 up.
 
-CI asserts both paths, because a fallback nobody exercises is a fallback that has already
-broken. The test matrix runs 3.9, 3.11 and 3.13 without `libratom`, and a separate job installs
-the full documented requirements on 3.11 and proves `libratom` imports and is detected. If
-that job ever goes red, `libratom` has moved and `setup.sh`'s interpreter cap needs revisiting.
+A directory of `.eml` files needs no `readpst` and is checked first. CI runs the suite on 3.9,
+3.11 and 3.13 with `readpst` stubbed, and a separate job installs `pst-utils` and converts a
+real, public PST end to end on 3.13, checking the emails, folders and attachments that come out.
 
 ## Testing
 

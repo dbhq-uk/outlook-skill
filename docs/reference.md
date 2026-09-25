@@ -194,7 +194,7 @@ outlook_to_md.py [-h] [--include-deleted] [--timezone TZ] [--verbose] [--append]
 | `pst_file` | A PST file, or a directory of `.eml` files |
 | `output_dir` | Created if absent |
 | `--append` | Skip emails already archived, matched on `Message-ID`. Without it the run overwrites |
-| `--include-deleted` | Include deleted items from the PST |
+| `--include-deleted` | Include deleted items from the PST (passes `-D` to `readpst`) |
 | `--timezone TZ` | Render dates in this zone, default UTC |
 | `--owner-email EMAIL` | Fixes `MAILER-DAEMON` senders in sent items |
 | `--verbose`, `-v` | Per-email logging |
@@ -203,8 +203,9 @@ Run it with the skill's own interpreter: `~/.claude/skills/outlook-to-md/.venv/b
 
 ### Backends
 
-A directory input is handled directly and checked before any backend, whatever is installed. A
-PST file falls back **libratom**, then **readpst** (`pst-utils`).
+A directory input is handled directly and needs nothing else. A PST file is read with
+**readpst** (`pst-utils`): `readpst -e -8 -o <tmp> <pst>`, with `-D` added by
+`--include-deleted`. Without `readpst` a PST run stops and says how to install it.
 
 ### Output
 
@@ -269,7 +270,7 @@ A pre-multi-account install with flat `~/.dbhq/outlook/*.json` files is migrated
 | Skill | Required | Optional |
 |---|---|---|
 | `outlook` | `azure-cli`, `jq`, `curl` | `pandoc`, for every markdown command |
-| `outlook-to-md` | `python3` 3.9+ | `readpst` (`pst-utils`), the fallback PST backend |
+| `outlook-to-md` | `python3` 3.9+ | `readpst` (`pst-utils`), needed for `.pst` files only |
 
 `install.sh` checks these per skill, so a missing `azure-cli` skips `outlook` and leaves
 `outlook-to-md` installed rather than failing the lot.

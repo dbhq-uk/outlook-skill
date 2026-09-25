@@ -10,7 +10,7 @@ Turn Outlook mail into an organised, integrity-verified archive of markdown file
 ## Prerequisites
 
 - Python virtual environment set up (run setup.sh if not done)
-- At least one of: `libratom` (Python) or `readpst` (system tool from pst-utils)
+- `readpst` (system tool from pst-utils), to read a `.pst`. A directory of `.eml` files does not need it
 
 ### First-Time Setup
 
@@ -19,9 +19,9 @@ Turn Outlook mail into an organised, integrity-verified archive of markdown file
 ${CLAUDE_SKILL_DIR}/setup.sh
 ```
 
-### System Dependencies (optional fallback)
+### System Dependency for PST Files
 
-If libratom installation fails, install readpst as a fallback:
+`readpst` is the only PST reader. If `setup.sh` reports it missing, ask the user to install it:
 
 ```bash
 # Ubuntu/Debian
@@ -140,7 +140,7 @@ outlook_to_md.py [-h] [--include-deleted] [--timezone TZ] [--verbose] [--append]
 |----------|-------------|
 | `pst_file` | Path to PST file, or directory of pre-extracted .eml files |
 | `output_dir` | Output directory (created if needed) |
-| `--include-deleted` | Include deleted items from PST |
+| `--include-deleted` | Include deleted items from PST (passes `-D` to readpst) |
 | `--timezone TZ` | Target timezone for dates (default: UTC) |
 | `--verbose`, `-v` | Verbose output with per-email logging |
 | `--append` | Skip emails already in archive (by Message-ID) |
@@ -148,12 +148,10 @@ outlook_to_md.py [-h] [--include-deleted] [--timezone TZ] [--verbose] [--append]
 
 ## Extraction Backends
 
-A directory input (pre-extracted `.eml` files) is always handled directly,
-checked before any backend regardless of what is installed. A PST file falls
-back in this order:
-
-1. **libratom** (Python) - preferred, installed via requirements.txt
-2. **readpst** (system CLI) - fallback, from pst-utils package
+A directory input (pre-extracted `.eml` files) is handled directly and needs
+nothing else. A PST file is read with **readpst** (from pst-utils), run as
+`readpst -e -8 -o <tmp> <pst>` with `-D` added by `--include-deleted`. Its
+`.eml` output then goes through the same path as a directory input.
 
 ## Integrity Verification
 
@@ -181,7 +179,7 @@ Grep is exact, so search on names, addresses and distinctive phrases rather than
 
 ## Error Handling
 
-- **"readpst not found"**: Install pst-utils or ensure libratom is installed via setup.sh
+- **"readpst is not installed"**: Install pst-utils (`sudo apt install pst-utils`, or `brew install libpst` on macOS)
 - **Corrupt emails**: Logged to extraction_log.txt, processing continues
 - **Encoding issues**: Falls back through UTF-8 → latin-1 → raw bytes
 - **Duplicate timestamps**: Appended with -001, -002 suffixes
