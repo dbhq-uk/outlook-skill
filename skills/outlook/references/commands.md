@@ -9,8 +9,9 @@ directory: use the full paths SKILL.md gives. Every command takes `--account <na
 (or `-a <name>`) before the verb; otherwise `OUTLOOK_ACCOUNT`, then `default`.
 
 **IDs.** Listings print a short ID (the last 20 characters of the Graph ID). Every command that
-takes an ID accepts the short or the full form. A message moved to another folder gets a new
-ID there, so list the folder again before acting on it.
+takes an ID accepts the short or the full form. A message keeps its ID when it moves to another
+folder, Deleted Items included, so an ID from a listing still works after `move`, `batch-move`
+or `delete`.
 
 **Folder names.** `move`, `batch-move`, `folder`, `mkdir`, `rename` and `rmdir` resolve a name
 the same way: a bare name matches case-insensitively anywhere in the tree (the shallowest wins

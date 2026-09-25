@@ -14,7 +14,7 @@ and `${CLAUDE_SKILL_DIR}/scripts/outlook-<name>.sh` inside the skill itself.
 
 **Message IDs.** Listings print a 20-character short ID (the tail of the full Graph ID). Every
 command taking an ID accepts either form. Short IDs resolve from `id_cache.json`, which every
-listing populates, so list-then-act costs no extra API call. A moved message has a new ID.
+listing populates, so list-then-act costs no extra API call. A moved message keeps its ID.
 
 **Folder names.** `move`, `batch-move`, `folder`, `mkdir`, `rename` and `rmdir` resolve names
 identically: a bare name matches case-insensitively anywhere in the tree, shallowest wins on a
@@ -128,7 +128,7 @@ Graph's 150 MB ceiling.
 | `rmcategory <name>` | Removes from the master list only. Messages keep the label |
 | `junk <id>` / `notjunk <id>` | To Junk Email, or back to the Inbox |
 | `archive <id>` | To the Archive folder |
-| `delete <id>` | Moves the message to Deleted Items, where it can be restored. It gets a new ID there |
+| `delete <id>` | Moves the message to Deleted Items, where it can be restored. It keeps its ID |
 | `move <id> <folder>` | |
 | `batch-move <folder> <id…>` | IDs as arguments or on stdin. Batches of 20 via Graph `$batch` |
 

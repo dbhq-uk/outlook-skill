@@ -2365,12 +2365,14 @@ ${existing_body}"
 
             # A batch goes out once, then again for any messages Graph
             # throttled (429), after their Retry-After, up to
-            # OUTLOOK_MAX_RETRIES times.
+            # OUTLOOK_MAX_RETRIES times. Each request inside a $batch carries
+            # its own headers, so each one asks for immutable IDs itself, as
+            # outlook_curl does for every other call.
             round=0
             while [ ${#pending[@]} -gt 0 ]; do
                 requests=$(for idx in "${pending[@]}"; do printf '%s\t%s\n' "$idx" "${ids[$idx]}"; done \
                     | jq -Rn --arg dest "$dest_folder_id" \
-                        '[inputs | split("\t") | {id: .[0], method: "POST", url: ("/me/messages/" + .[1] + "/move"), headers: {"Content-Type": "application/json"}, body: {destinationId: $dest}}]')
+                        '[inputs | split("\t") | {id: .[0], method: "POST", url: ("/me/messages/" + .[1] + "/move"), headers: {"Content-Type": "application/json", "Prefer": "IdType=\"ImmutableId\""}, body: {destinationId: $dest}}]')
                 body=$(jq -n --argjson reqs "$requests" '{requests: $reqs}')
                 resp=$(api_call POST "/\$batch" "$body")
 

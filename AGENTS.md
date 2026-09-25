@@ -59,7 +59,8 @@ bash skills/outlook/tests/token_test.sh    # token refresh against a fake curl
 bash skills/outlook/tests/calendar_test.sh # calendar verbs against a fake curl
 bash skills/outlook/tests/mail_test.sh     # draft From, send summary, reply-all and the chain marker, against a fake curl
 bash skills/outlook/tests/chain_marker_test.sh # the live chain marker check, against a fake Exchange
-bash skills/outlook/tests/graph_test.sh    # timeouts, 429/503 retries and batch-move failures
+bash skills/outlook/tests/move_id_test.sh  # the live move ID check, against a fake Exchange
+bash skills/outlook/tests/graph_test.sh    # timeouts, 429/503 retries, batch-move failures, immutable IDs on every request
 bash skills/outlook/tests/setup_test.sh    # setup: public client, PKCE, no secret, the old-secret path
 bash skills/outlook/tests/docs_test.sh     # SKILL.md word limit and dashes; every verb documented; no path into the other skill
 bash skills/outlook/tests/send_gap_test.sh # read-only mode and the calendar send flags
@@ -76,7 +77,7 @@ against a fake `curl` and a throwaway `HOME`, so it never touches real
 credentials. Anything that needs real Graph calls (actual search results) still
 wants a manual smoke test against a configured account.
 
-One such question has its own script. `update mdbody` keeps a reply's quoted
+Two such questions have their own scripts. The first: `update mdbody` keeps a reply's quoted
 history by finding an empty `<span data-mdreply-chain-start="1"></span>` in the
 draft, so it depends on Exchange keeping that span when it saves a draft. Run
 this against a configured account after a change to the marker or to
@@ -91,3 +92,16 @@ runs the real `update mdbody`, reads the body back after each step, and moves
 the draft to Deleted Items. It sends nothing. Exit 0 means the history is safe;
 exit 1 names the step that lost it. CI does not run it, because it needs a
 real mailbox.
+
+The second: every request asks Graph for immutable IDs, so a message should keep
+its ID when it moves. Run this after a change to how requests are made, or if an
+ID ever stops working after a move:
+
+```bash
+bash skills/outlook/tests/move_id_live.sh [--account <name>]
+```
+
+It creates a draft with no recipients, moves it to Deleted Items with the real
+`delete`, then reads it with the real `read` by the ID it had before the move.
+It sends nothing, and the draft stays in Deleted Items. Exit 0 means the ID
+survived the move.

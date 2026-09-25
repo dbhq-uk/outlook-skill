@@ -56,7 +56,7 @@ waits for a person to paste back a URL.
 
 Mail is `outlook-mail.sh <verb>`, calendar is `outlook-calendar.sh <verb>`. Add
 `--account <name>` before the verb for another mailbox. Listings print short IDs, which every
-command accepts. A message moved to another folder gets a new ID.
+command accepts. A message keeps its ID when it moves to another folder.
 
 **Read mail**
 - `inbox`, `unread`, `focused`, `sent`, `drafts`, `flagged` `[count]`: list, newest first
