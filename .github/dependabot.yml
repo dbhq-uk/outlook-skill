@@ -16,12 +16,9 @@ updates:
           - "*"
 
   # The live half is bash calling the Azure CLI, curl and jq, and pins nothing.
-  # outlook-to-md does have real dependencies, and they are the awkward kind:
-  # libratom pulls a transitive numpy that only resolves on Python 3.9 to 3.11,
-  # so a bump here can break the install on the interpreters this skill
-  # deliberately supports. Grouped into one pull request because the pins move
-  # together, and opened at all because a silent drift in libratom is how the
-  # PST backend stops installing.
+  # outlook-to-md has a few small Python dependencies (html2text, dateutil,
+  # tqdm). Grouped into one pull request so they move together, and CI runs the
+  # suite on 3.9 to 3.13 against whatever a bump brings in.
   - package-ecosystem: pip
     directory: /skills/outlook-to-md
     schedule:

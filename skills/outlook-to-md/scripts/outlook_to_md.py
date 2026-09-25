@@ -18,6 +18,7 @@ import argparse
 import csv
 import hashlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -53,15 +54,6 @@ try:
     HAS_HTML2TEXT = True
 except ImportError:
     HAS_HTML2TEXT = False
-
-# Try libratom/pypff first, fall back to readpst
-USE_LIBRATOM = False
-try:
-    from libratom.lib.pff import PffArchive
-
-    USE_LIBRATOM = True
-except ImportError:
-    pass
 
 
 def sanitize_filename(text: str, max_length: int = 50) -> str:
@@ -339,15 +331,12 @@ class EmailExtractor:
         self._build_provenance()
         print()
 
-        # Test the input before the backend. A directory of .eml is a documented
-        # first-class input, but this branch used to live inside the readpst
-        # path, so it was only reachable when readpst was ALSO missing - and a
-        # directory handed to libratom raises "OSError: ... Is a directory".
+        # A directory of .eml is a first-class input (a Graph export, or a PST
+        # already run through readpst elsewhere). Anything else is a PST, and
+        # readpst is the only PST reader.
         if self.pst_path.is_dir():
             print(f"Processing pre-extracted emails from: {self.pst_path}")
             self._process_eml_directory(self.pst_path)
-        elif USE_LIBRATOM:
-            self._extract_with_libratom()
         else:
             self._extract_with_readpst()
 
@@ -357,157 +346,42 @@ class EmailExtractor:
 
         self._print_summary()
 
-    def _extract_with_libratom(self):
-        """Extract using libratom/pypff."""
-        print("Using libratom for extraction...")
+    def readpst_command(self, out_dir: Path) -> list:
+        """The readpst command line for this extraction.
 
-        with PffArchive(self.pst_path) as archive:
-            messages = list(archive.messages())
-            self.stats['total'] = len(messages)
-
-            for message in tqdm(messages, desc="Extracting emails"):
-                try:
-                    self._process_libratom_message(message)
-                except Exception as e:
-                    self.stats['errors'] += 1
-                    self.log_error(f"Failed to process message: {e}")
-
-    def _process_libratom_message(self, message):
-        """Process a single message from libratom."""
-        # Extract metadata
-        sent_date = message.delivery_time or message.creation_time
-        if sent_date is None:
-            sent_date = datetime.now(timezone.utc)
-
-        subject = message.subject or "(No Subject)"
-        sender = message.sender_name or ""
-        if message.sender_email_address:
-            if sender:
-                sender = f"{sender} <{message.sender_email_address}>"
-            else:
-                sender = message.sender_email_address
-
-        # Get recipients
-        to_list = []
-        cc_list = []
-        bcc_list = []
-
-        # libratom message properties
-        if hasattr(message, 'plain_text_body'):
-            body_text = message.plain_text_body or ""
-        else:
-            body_text = ""
-
-        if hasattr(message, 'html_body'):
-            body_html = message.html_body or ""
-        else:
-            body_html = ""
-
-        # Convert HTML to markdown if available
-        if body_html:
-            body_md = html_to_markdown(body_html)
-        else:
-            body_md = body_text
-
-        # Get headers
-        headers = ""
-        if hasattr(message, 'transport_headers'):
-            headers = message.transport_headers or ""
-
-        # Parse recipients from headers if available
-        if headers:
-            to_match = re.search(r'^To:\s*(.+?)(?=\n\S|\Z)', headers, re.MULTILINE | re.DOTALL)
-            if to_match:
-                to_list = [addr.strip() for addr in to_match.group(1).replace('\n', '').split(',')]
-            cc_match = re.search(r'^Cc:\s*(.+?)(?=\n\S|\Z)', headers, re.MULTILINE | re.DOTALL)
-            if cc_match:
-                cc_list = [addr.strip() for addr in cc_match.group(1).replace('\n', '').split(',')]
-
-        # Get message ID
-        message_id = ""
-        if headers:
-            mid_match = re.search(r'^Message-ID:\s*(.+)$', headers, re.MULTILINE | re.IGNORECASE)
-            if mid_match:
-                message_id = mid_match.group(1).strip()
-
-        # Folder path
-        folder_path = "Unknown"
-
-        # Process attachments
-        attachments = []
-        if hasattr(message, 'attachments'):
-            for i, attachment in enumerate(message.attachments):
-                att_info = self._save_attachment(attachment, i + 1, None)  # Will set path later
-                if att_info:
-                    attachments.append(att_info)
-
-        # Create email data dict
-        email_data = {
-            'sent_date': sent_date,
-            'subject': subject,
-            'sender': sender,
-            'to_list': to_list,
-            'cc_list': cc_list,
-            'bcc_list': bcc_list,
-            'body_md': body_md,
-            'body_text': body_text,
-            'headers': headers,
-            'message_id': message_id,
-            'folder_path': folder_path,
-            'attachments': attachments,
-            'raw_message': message,
-        }
-
-        self._save_email(email_data)
+        -e writes each message as its own .eml file inside a folder tree that
+        mirrors the PST, which is what _process_eml_directory reads. -8 asks
+        for UTF-8 bodies where the PST holds them. -D includes deleted items,
+        and is passed only when --include-deleted is given.
+        """
+        cmd = ['readpst', '-e', '-8']
+        if self.include_deleted:
+            cmd.append('-D')
+        cmd += ['-o', str(out_dir), str(self.pst_path)]
+        return cmd
 
     def _extract_with_readpst(self):
-        """Extract using readpst command-line tool."""
-        print("Using readpst for extraction...")
-
-        # Check if readpst is available
-        readpst_available = False
-        try:
-            subprocess.run(['readpst', '-V'], capture_output=True, check=True)
-            readpst_available = True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-
-        if not readpst_available:
-            # Check if input is a directory of pre-extracted emails
-            if self.pst_path.is_dir():
-                print(f"Processing pre-extracted emails from: {self.pst_path}")
-                self._process_eml_directory(self.pst_path)
-                return
-
-            print("ERROR: readpst not found and input is not a directory.")
+        """Extract a PST with readpst, then process its .eml output."""
+        if shutil.which('readpst') is None:
+            print("ERROR: readpst is not installed, so this PST cannot be read.")
             print()
             print("Options:")
-            print("  1. Install pst-utils (recommended):")
+            print("  1. Install pst-utils, which provides readpst:")
             print("     Ubuntu/Debian: sudo apt install pst-utils")
             print("     macOS: brew install libpst")
             print()
-            print("  2. Install libratom:")
-            print("     pip install libratom")
-            print()
-            print("  3. Pre-extract emails using readpst on another machine:")
-            print(f"     readpst -e -o extracted_emails/ {self.pst_path.name}")
-            print("     Then run this tool on the extracted_emails/ directory")
+            print("  2. Run readpst on another machine, then point this tool at its output:")
+            print(f"     readpst -e -8 -o extracted_emails/ {self.pst_path.name}")
+            print("     python outlook_to_md.py extracted_emails/ <output_dir>")
             sys.exit(1)
 
-        # Create temp directory for readpst output
+        print("Using readpst for extraction...")
         with tempfile.TemporaryDirectory() as tmpdir:
             tmppath = Path(tmpdir)
 
-            # Run readpst with EML output
             print("Extracting emails from PST (this may take a while)...")
             result = subprocess.run(
-                [
-                    'readpst',
-                    '-e',  # Extract each message to separate file
-                    '-o',
-                    str(tmppath),
-                    str(self.pst_path),
-                ],
+                self.readpst_command(tmppath),
                 capture_output=True,
                 text=True,
             )
@@ -741,8 +615,6 @@ class EmailExtractor:
         eml_path = email_folder / "email.eml"
         if 'raw_eml_path' in email_data:
             # Copy the original eml file
-            import shutil
-
             shutil.copy2(email_data['raw_eml_path'], eml_path)
         else:
             # Generate .eml from message data
@@ -1155,7 +1027,9 @@ def main():
     )
     parser.add_argument("pst_file", help="Path to PST file (or directory of .eml files)")
     parser.add_argument("output_dir", help="Output directory")
-    parser.add_argument("--include-deleted", action="store_true", help="Include deleted items")
+    parser.add_argument(
+        "--include-deleted", action="store_true", help="Include deleted items (passes -D to readpst; PST input only)"
+    )
     parser.add_argument("--timezone", default="UTC", help="Target timezone for dates (default: UTC)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument(

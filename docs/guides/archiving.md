@@ -19,9 +19,8 @@ $MD/setup.sh
 That builds a virtualenv next to the skill. Nothing else is needed - `outlook-to-md` makes no
 network calls and holds no credentials. It reads files on disk.
 
-If `setup.sh` tells you it built the venv without `libratom`, read
-[why](../architecture.md#the-python-version-problem) and install `pst-utils` (Debian/Ubuntu)
-or `libpst` (Homebrew). Either backend is enough; a directory of `.eml` files needs neither.
+To read a `.pst` you also need `readpst`: install `pst-utils` (Debian/Ubuntu) or `libpst`
+(Homebrew). `setup.sh` says whether it found it. A directory of `.eml` files needs nothing extra.
 
 ## Extract a PST
 
@@ -34,7 +33,7 @@ Useful additions:
 ```bash
 --timezone "Europe/London"          # dates render in this zone, default UTC
 --owner-email "you@example.com"     # fixes MAILER-DAEMON senders in sent items
---include-deleted                   # deleted items too
+--include-deleted                   # deleted items too (readpst -D)
 ```
 
 Reckon on roughly 5,000 emails an hour without attachments and 2,000 with; a 300 MB PST of

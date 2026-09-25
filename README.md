@@ -124,12 +124,11 @@ you can take either half on its own.
 | Skill | Required | Optional |
 |---|---|---|
 | `outlook` | `azure-cli` · `jq` · `curl` | `pandoc` (markdown-formatted emails) |
-| `outlook-to-md` | `python3` (3.9+) | `readpst` (`pst-utils`; fallback PST backend) |
+| `outlook-to-md` | `python3` (3.9+) | `readpst` (`pst-utils`; needed for `.pst` files only) |
 
-`outlook-to-md` provisions its own virtualenv on install. Its preferred PST backend pins an
-old numpy and cannot install on Python 3.12 or later, so `setup.sh` picks a 3.9-3.11
-interpreter when one exists and otherwise builds without it and says so - see [the Python
-version problem](docs/architecture.md#the-python-version-problem).
+`outlook-to-md` provisions its own virtualenv on install, on any Python from 3.9 up. It reads
+a `.pst` through `readpst`, and a folder of `.eml` files (which is how live mail arrives) needs
+nothing extra - see [one PST reader](docs/architecture.md#one-pst-reader).
 
 ## Documentation
 
