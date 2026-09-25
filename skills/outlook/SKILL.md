@@ -1,667 +1,105 @@
 ---
 name: outlook
-description: Use for email and calendar operations - checking inbox, sending emails, viewing calendar, scheduling events. Trigger on phrases like "check email", "draft email", "my calendar", "schedule", "am I free".
+description: Microsoft 365 Outlook mail and calendar through Microsoft Graph - read and search the inbox, draft, reply and send, attachments, categories and folders, calendar events, invitations and free/busy. Use for "check my email", "draft an email", "reply to", "my Outlook calendar", "am I free", "book a meeting", "Microsoft 365 mail". Not for Gmail or Google Calendar, and not for PST files (use outlook-to-md).
 ---
 
-# Outlook Email & Calendar
+# outlook
 
-Access Microsoft 365 Outlook email and calendar via Microsoft Graph API.
+Microsoft 365 Outlook mail and calendar through the Microsoft Graph API. Two scripts do the
+work: `${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh` and
+`${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh`. The index below has every command. For the
+exact arguments and behaviour, read `references/commands.md`.
 
-## CRITICAL: Replies preserve ALL original recipients (reply-all by default)
+## Rules
 
-**`reply`, `mdreply`, and `followup` use Microsoft Graph's `createReplyAll` endpoint. The new draft includes every `To:` and `Cc:` recipient from the original message — not just the sender.**
+**1. Draft, show, then send.** Every mail command makes a draft; only `send` sends. Show the
+user the draft (From, To, Cc, Bcc, subject, body, attachments) and wait for an explicit "send
+it" before running `send`. The same goes for invitations: `create` an event with no attendees,
+show the user the event and the attendee list, and run `invite` only after they approve.
 
-Mandatory rules:
+**2. Replies go to everyone.** `reply`, `mdreply` and `followup` are reply-all: every original To
+and Cc recipient is on the draft. Read the original's full To and Cc before replying, and check
+the recipients the draft prints. People Cc assistants and colleagues; dropping them is a real
+harm. For a reply to the sender only, trim the draft with `update to` and `update cc ""`.
 
-1. **Always read the original message's full `To:` and `Cc:` lists BEFORE creating a reply.** Use a direct API call if `read` truncates: `curl … "/me/messages/<id>?$select=toRecipients,ccRecipients"`. Knowing who's on the thread is part of "reading the full body end-to-end" — do not skip it.
-2. **After creating any reply draft, confirm the displayed `To:`, `Cc:`, and `Bcc:` lines match what you intended.** All three reply commands now print every recipient (not just `To[0]`). If the list looks short, the original might have had CCs you missed — re-check before sending.
-3. **If you genuinely want sender-only**, create the reply, then run `update to <sender-email>` and `update cc ""` (or manually edit) to trim recipients. Default is "everyone stays in the loop".
-4. **Never assume a single-recipient `To:` means a single-recipient thread.** Estate agents, solicitors, accountants, and courts routinely Cc colleagues, assistants, and audit addresses. Dropping those CCs on reply is a real harm — they stop seeing the conversation.
+**3. Read the whole message.** `preview` is a 200-character snippet, for finding a message only.
+Before you summarise, answer or act on an email, `read` it end to end, including the attachment
+list and any request in the body. In a long chain, find where the current message ends and the
+quoted chain begins.
 
-This rule exists because a previous reply silently dropped two CCs (assistant addresses on an estate-agent thread); the recipients had to be looped back in via a follow-up email. Reply-all is now the default to make recipient loss impossible by accident.
+**4. Check the time.** Run `date` (and `date -u`) before anything that involves today, deadlines
+or "yesterday"; a session can span days. Graph timestamps are UTC. Calendar times are wall-clock
+in `OUTLOOK_TZ`, which defaults to the system zone, and a server is often UTC when the user is
+not. If the calendar warns that it is using UTC and that is not the user's zone, set
+`OUTLOOK_TZ` (for example `Europe/London`) before quoting a time.
 
-## CRITICAL: Reading email content
-
-**`preview` is a snippet (first ~200 chars of body), not the full message. NEVER use `preview` to analyse, summarise, respond to, or report on email content. A short preview does NOT mean a short message — the message can continue for many paragraphs and contain attachments, requests, deadlines, or substantive content not visible in the preview.**
-
-Mandatory rules:
-
-1. **Use `read <message-id>` for any substantive engagement** with an email — analysis, summary, reply, decision-making, documentation. Always.
-2. **Use `preview` only for navigation** — finding the right message ID from a list, confirming a subject line, checking date/sender. Never for content.
-3. **If the `read` output gets truncated** by terminal/tool limits, extract the body via grep or jq with a wide enough regex to capture the whole message. Do not stop at the first match.
-4. **Before replying to or reporting on a message, confirm internally**: "Have I read the full body end-to-end, including any attachment list and request lines?"
-5. **For long reply chains**: the `read` output includes the quoted prior chain. Identify the body of the *current* message (between the headers `---` separator and the start of the quoted chain) and ensure that body is fully captured before doing anything else.
-
-This rule exists because trusting previews has led to missing critical content (attachments, action requests, deadlines, off-chain coordination signals). It is non-negotiable.
-
-## Time and date awareness
-
-Email correspondence routinely uses relative times — "today", "yesterday", "by tomorrow", "this morning", "by EOD Tuesday". Each of those is ambiguous without an anchor.
-
-Mandatory rules:
-
-1. **At the start of any email work, run `date` via Bash** to confirm the current date/time. Never assume the date from earlier in the conversation — the conversation may span days, and the system date can roll over.
-2. **When computing deadlines or "ago" references**, anchor against actual `date` output, not memory. Example: an email timestamped `2026-05-06T16:10:58Z` is Wednesday 6 May at 17:10 BST (UTC+1 in summer), not yesterday.
-3. **When an email is about to be sent**, confirm the date in the planned send is correct (the date you're embedding in the body must match the date the email will actually arrive).
-4. **Track timezone explicitly** (BST vs UTC). UK summer time = UTC+1. Microsoft Graph timestamps are UTC.
-5. **Check `OUTLOOK_TZ` before quoting any calendar time.** All calendar commands report and accept wall-clock time in the configured timezone, which defaults to the *system* timezone. Servers, containers and CI boxes are almost always UTC while the mailbox owner is not — and then a 14:00 London meeting is reported as "13:00". Same instant, wrong wall-clock, missed meeting. The calendar script prints its active timezone and warns when it is UTC-by-default; if that zone is not the user's, export `OUTLOOK_TZ` (e.g. `OUTLOOK_TZ=Europe/London`) before trusting any time.
-
-If unsure of the date or time, run `date` and `date -u` (UTC) before responding.
-
-## Email font and formatting preferences
-
-The skill applies these inline styles to every markdown-converted email body, on every command (`mddraft`, `mdreply`, `forward`, `followup`, `update mdbody`):
-
-| Property | Value | Why inline |
-|---|---|---|
-| **Font family** | `'Aptos', 'Aptos Display', 'Segoe UI', Roboto, sans-serif` | Aptos is the Microsoft 365 default since 2024. Falls back to Segoe UI on older Outlook, Roboto / system sans on non-Microsoft clients. Inline `style=""` survives Outlook's `<style>`-block stripping. |
-| **Font size** | `14px` | Readable, professional |
-| **Line height** | `1.5` (mddraft / update mdbody) or `1.6` (mdreply / forward / followup) | Comfortable spacing |
-| **Colour** | `#333` | Soft black; avoids harsh `#000` |
-| **Paragraph margin** | `0 0 14px 0` (inline on every `<p>` tag) | Outlook ignores `<p>` margins from `<style>` blocks but respects inline. Without this, paragraphs collapse together until Outlook re-renders the draft after an edit. |
-
-All of this is implemented in ONE place: the `md_to_html` helper (and its `FONT_STACK` variable) in `scripts/outlook-mail.sh`. To change font preferences globally, edit that helper.
-
-## Multiple accounts
-
-Each account stores credentials under `~/.dbhq/outlook/<account>/`. The active account is selected by (in order of precedence): `--account <name>` / `-a <name>` flag, the `OUTLOOK_ACCOUNT` env var, then `default`.
-
-```bash
-# Default account
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh inbox
-
-# Named account (flag)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh -a work inbox
-
-# Named account (env var)
-OUTLOOK_ACCOUNT=work ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh inbox
-
-# List configured accounts
-${CLAUDE_SKILL_DIR}/scripts/outlook-token.sh list
-
-# Add a new account (reuses existing Azure app registration if one exists).
-# Interactive: the user runs this, not the agent. See Setup below.
-${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh --account work
-```
-
-An existing single-account install at `~/.dbhq/outlook/{config,credentials,id_cache}.json` is auto-migrated to `~/.dbhq/outlook/default/` on the first run of any script. So are the two earlier homes: `~/.dbhq/outlook-graph`, from before the skill was renamed on 17 Sep 2026, and `~/.outlook-graph`, from before the `~/.dbhq` move. An install still at the oldest path makes both hops.
-
-Calendar timezone is auto-detected from the system. Override with `OUTLOOK_TZ`, e.g. `OUTLOOK_TZ=America/New_York ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh today`.
-
-## Prerequisites
-
-- Credentials configured in `~/.dbhq/outlook/<account>/`. If not, ask the user to run
-  setup (see [Setup](#setup)); do not run it yourself.
-- Azure CLI, jq, curl and openssl installed
-
-**Note:** Tokens refresh themselves when a command needs it. If a refresh is refused (the
-sign-in has lapsed), the user has to run setup again.
-
-## Refusals and permission prompts
-
-Some commands refuse on purpose, and some make Claude Code ask the user first.
-Both are the send gap working. Never work around either one, for example by
-calling Graph with curl yourself or by rewriting the command so it is not
-recognised.
-
-- `OUTLOOK_READ_ONLY=1` refuses every command that writes or sends. Only
-  listings and reads run. If a command refuses for this reason, tell the user;
-  do not unset the variable.
+**5. Refusals and permission prompts are the send gap working.** Never work around one, for
+example by calling Graph with curl yourself or by rewording a command so it is not recognised.
+- With `OUTLOOK_READ_ONLY=1`, every command that writes or sends refuses. Tell the user; do not
+  unset it.
 - `send`, `invite`, `respond`, `cancel`, `create ... --send-invites` and
-  `update ... --notify-attendees` may raise a permission prompt. That prompt is
-  the user's approval. Show them what will be sent before you run the command.
-
-## Email Operations
-
-### Reading Email
-
-```bash
-# List inbox (default 10 messages)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh inbox
-
-# List more messages
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh inbox 25
-
-# Unread only
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh unread
-
-# Focused inbox only
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh focused
-
-# List sent items (your sent emails)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh sent
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh sent 25
-
-# List messages from any folder by name (searches recursively)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh folder "Projects" 20
-
-# Filter by sender (newest first)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh from "john@example.com"
-
-# Search emails. Free text searches across fields; add a count (default 10, max
-# 1000, or "all"). Results come back ranked by Graph, then sorted newest-first.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search "project update"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search "invoice" 50
-
-# Search with KQL for precision: field operators (subject:, from:, to:, body:)
-# and booleans (AND/OR/NOT). The query is passed through to Graph's $search.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search 'subject:invoice AND from:jane@example.com'
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh search 'from:acme.com AND body:renewal' all
-
-# Messages flagged for follow-up (newest first)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh flagged
-
-# Messages carrying a category, in any folder (newest first, with short IDs)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh category "Follow up"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh category "Follow up" 50
-
-# The whole conversation a message belongs to (oldest first) - use this to see
-# a full back-and-forth thread across inbox and sent items
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh thread <message-id>
-
-# Read full message (use ID from list)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh read <message-id>
-
-# Quick preview (subject, from, date, body preview)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh preview <message-id>
-```
-
-### Sending Email
-
-```bash
-# Create plain text draft
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh draft "recipient@example.com" "Subject" "Body text"
-
-# Create markdown-formatted draft (converts to HTML)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mddraft "recipient@example.com" "Subject" "**Bold** and _italic_ text"
-
-# Several recipients, and Cc/Bcc: every list is comma- or semicolon-separated.
-# The draft prints To, Cc and Bcc as Graph stored them - check them.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mddraft "a@example.com; b@example.com" "Subject" "Body" --cc "c@example.com" --bcc "audit@example.com"
-
-# Send a draft (use draft ID)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send <draft-id>
-
-# Reply to a message (plain text - creates draft, REPLY-ALL: includes original To: + Cc:)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh reply <message-id> "Reply body"
-
-# Reply with markdown formatting (converts to HTML - creates draft, REPLY-ALL: includes original To: + Cc:)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mdreply <message-id> "**Bold** reply with _formatting_"
-
-# (For sender-only reply, create the draft then trim recipients via `update to`/`update cc`.)
-
-# Send reply draft
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send <reply-draft-id>
-
-# Forward a message (creates a DRAFT with the quoted message + its attachments).
-# Recipients are comma/semicolon-separated; the optional comment is markdown.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh forward <message-id> "to@example.com"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh forward <message-id> "a@x.com, b@y.com" "FYI - see the thread below, **deadline is Friday**."
-
-# Follow up on your own sent email (chaser)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup <sent-message-id>
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup <sent-message-id> "Custom follow-up body in **markdown**"
-
-# Update an existing draft
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> subject "New subject line"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> body "Plain text body"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> mdbody "**Markdown** body"
-# to: replaces the To line. cc/bcc: append to existing (deduped, case-insensitive).
-# All three accept a comma/semicolon-separated list of addresses.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> to "new-recipient@example.com"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> cc "one@example.com, two@example.com"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> bcc "bcc@example.com"
-# Pass an empty string to clear all CC/BCC recipients (e.g. to trim a reply-all to sender-only):
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> cc ""
-# Mark a draft high/low importance:
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> importance high
-# Send as an alias (see "Sending as an alias" below):
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> from "alias@example.com"
-
-# List drafts
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh drafts
-```
-
-**Note:** `mddraft`, `mdreply`, and `update mdbody` require `pandoc` for markdown conversion. Install with `brew install pandoc` (macOS) or `apt install pandoc` (Linux).
-
-### Sending as an alias
-
-A mailbox can send as its primary address or any of its aliases (proxy addresses). List them first — never guess an alias:
-
-```bash
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh aliases
-```
-
-Set the From address on **any** draft with `update <draft-id> from`. This works on every draft — including those made by `reply`, `mdreply`, `forward`, and `followup` — so it is the way to send as an alias:
-
-```bash
-# Draft, set the alias, confirm, then send
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh draft "recipient@example.com" "Subject" "Body"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> from "alias@example.com"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send <draft-id>
-
-# Replies work the same way - create the reply, then set the alias
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mdreply <message-id> "**Thanks** - see below."
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> from "alias@example.com"
-```
-
-To default every draft to an alias, set `OUTLOOK_FROM_ADDRESS`. It applies to every command that makes a draft: `draft`, `mddraft`, `reply`, `mdreply`, `followup` and `forward`. Each prints the From it set. `update from` still overrides it on one draft:
-
-```bash
-OUTLOOK_FROM_ADDRESS="alias@example.com" ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh draft "to@example.com" "Subject" "Body"
-OUTLOOK_FROM_ADDRESS="alias@example.com" ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mdreply <message-id> "Thanks"
-```
-
-Rules and behaviour:
-
-1. **Always confirm the From line with the user before sending as an alias.** Which identity a message goes out as is as consequential as who receives it. Every draft command and `update from` print the From address, and `send` reads the draft back and prints From, To, Cc, Bcc, Subject and attachments before it posts. If `OUTLOOK_FROM_ADDRESS` is set and the draft would go from a different address, `send` warns.
-2. **Tenant support is required.** Send-from-alias only works when the tenant has `SendFromAliasEnabled` set (`Set-OrganizationConfig -SendFromAliasEnabled $true`). Without it, Exchange silently rewrites the From back to the primary address — so verify a test send actually arrived as the alias before relying on it.
-3. **An unrecognised address warns rather than blocks**, because SendAs rights on a *shared* mailbox are real but never appear in this mailbox's alias list. If the address genuinely is not permitted, `send` fails with `ErrorSendAsDenied` and nothing is sent — a wrong alias cannot leak out.
-4. **`OUTLOOK_FROM_NAME` is usually ignored.** Exchange overrides the display name with the mailbox's own for addresses it owns; the address is what changes.
-5. **Check the alias domain's DNS before sending externally.** An alias on a domain with no DKIM signing or DMARC record may be spam-filtered by strict receivers even though the send itself succeeds.
-
-**IMPORTANT:** Always prefer `mdreply` over `reply` for professional emails - plain text replies look poorly formatted in Outlook.
-
-**Reply-chain preservation:** `update mdbody` automatically preserves the quoted reply chain on drafts created via `mdreply` or `followup` (an invisible `<span data-mdreply-chain-start="1">` marker is injected when the reply is created, and `update mdbody` splits on it). The plain `update body` command does NOT preserve the chain - if you need to edit a reply draft body, use `update mdbody`.
-
-### Attachments
-
-**Reading attachments:**
-```bash
-# List attachments on a message
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attachments <message-id>
-
-# Download ALL attachments to ./inbox/
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh download <message-id>
-
-# Download specific attachment
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh download <message-id> <attachment-id>
-```
-
-**Adding attachments to drafts:**
-```bash
-# Add attachment to a draft (supports files up to 150MB)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attach <draft-id> <file-path>
-```
-
-Upload method is automatic based on file size:
-- **Small files (< 3MB):** Direct base64 upload - instant
-- **Large files (3MB - 150MB):** Chunked upload with progress indicator
-
-Multiple attachments can be added by calling `attach` multiple times on the same draft.
-
-**Inline images and signatures:**
-```bash
-# An inline image the HTML body shows with <img src="cid:logo">
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attach <draft-id> logo.png --inline logo
-
-# Add an HTML signature to an HTML draft (mddraft and mdreply always make
-# one). Every <img> whose quoted src is a local file is
-# uploaded inline and its src rewritten to cid:, so it shows without the
-# reader allowing remote images. Relative paths are read from the HTML file's
-# directory. The block goes above the quoted chain.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh signature <draft-id> /path/to/signature.html
-```
-
-Add the signature after the body is right, or at any point: `update mdbody`
-keeps it, and running `signature` again replaces it rather than adding a
-second one. `update body` (plain text) replaces the whole body, signature
-included. A plain-text draft (`draft`) is refused: use `mddraft`.
-
-### Exporting Mail to a Markdown Archive
-
-Write a folder's messages out as raw `.eml`, then let `outlook-to-md` append
-them to an archive. The PST backfills history; this keeps it current.
-
-```bash
-# Everything in a folder
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh export "Inbox/Clients" ./staging/
-
-# Only what arrived since a date (use the archive's newest entry)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh export "Inbox/Clients" ./staging/ --since 2026-07-01
-
-# Cap how many messages are exported, newest first (default 1000)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh export "Inbox/Clients" ./staging/ --count 50
-
-# Then append into the archive - dedupes by Message-ID, so an overlapping
-# --since window is harmless
-${CLAUDE_SKILL_DIR}/../outlook-to-md/.venv/bin/python \
-  ${CLAUDE_SKILL_DIR}/../outlook-to-md/scripts/outlook_to_md.py \
-  ./staging/ ./archive/ --append
-```
-
-The staging directory's layout becomes the archive's folder grouping, so
-`export "Inbox/Clients"` lands under `emails/Inbox/Clients/`.
-
-Dedupe only works for mail that has a `Message-ID` header — always true for
-received mail, not guaranteed for drafts. A header-less message has nothing to
-dedupe against and is re-archived on every overlapping run.
-
-### Email Management
-
-```bash
-# Mark as read
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh markread <message-id>
-
-# Mark as unread
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh markunread <message-id>
-
-# Flag / unflag for follow-up (list flagged messages with `flagged`)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh flag <message-id>
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh unflag <message-id>
-
-# Categories: list the mailbox's master category names, then apply them.
-# Comma-separated list replaces the message's categories; "" clears them.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh categories
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh categorize <message-id> "Red category, Invoices"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh categorize <message-id> ""
-
-# --add and --remove change one category and leave the others alone. Prefer them
-# over the comma-separated form whenever you are not deliberately replacing the
-# whole list.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh categorize <message-id> --add "Follow up"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh categorize <message-id> --remove "Follow up"
-
-# Master category list. A colour is a name (red, dark blue, ...) or a presetN
-# value; run the command with no colour to create one without a colour.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkcategory "Follow up" red
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rccategory "Follow up" "dark blue"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rmcategory "Follow up"
-
-# There is no rename: Graph makes displayName immutable once a category exists.
-# mkcategory is safe to re-run: an existing name is reported, not an error.
-# rmcategory removes the category from the master list only. Messages already
-# carrying the label keep it; strip them with categorize --remove.
-
-# Junk handling (move to Junk Email / rescue back to Inbox)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh junk <message-id>
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh notjunk <message-id>
-
-# Delete: moves the message to Deleted Items, where the user can restore it.
-# The message gets a new ID there.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh delete <message-id>
-
-# Archive
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh archive <message-id>
-
-# Move to any folder. Names resolve identically across move/batch-move/folder/
-# rename/rmdir/mkdir: a bare name is matched case-insensitively anywhere in the
-# folder tree (shallowest wins on a tie); use a "Parent/Child" path to target a
-# specific nested folder when the same name exists in more than one place.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh move <message-id> "Projects"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh move <message-id> "Clients/Acme"
-
-# Move MANY messages at once (batches of 20 via the Graph $batch endpoint).
-# The destination folder is resolved once, so this is far faster than looping
-# `move`. IDs may be passed as arguments or piped via stdin.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh batch-move "Projects" <id1> <id2> <id3>
-# Pipe IDs from a listing (one per line or space-separated):
-some_command_that_prints_ids | ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh batch-move "Projects"
-```
-
-**Bulk sorting note:** to reorganise a whole inbox, list messages, group their
-IDs by destination folder, then call `batch-move` once per folder (piping the
-IDs). Moving a message assigns it a NEW id in the destination folder, so if you
-need to move it again, re-fetch ids from the destination folder first.
-
-### Folder Management
-
-```bash
-# List top-level folders
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh folders
-
-# List subfolders of a folder (default: inbox)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh subfolders
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh subfolders "Important"
-
-# Create a new top-level folder
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Projects"
-
-# Create a subfolder under an existing folder
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Acme" "Clients"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Urgent" inbox
-
-# Rename a folder (refuses well-known system folders)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rename "Old Name" "New Name"
-
-# Delete a folder: moves it, and everything in it, to Deleted Items. Refuses a
-# folder that holds messages unless --force; refuses system folders always.
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rmdir "Empty Folder"
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rmdir "Old Folder" --force
-
-# Inbox statistics (total, unread counts)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh stats
-```
-
-## Calendar Operations
-
-### Viewing Calendar
-
-```bash
-# Every listing prints each event's short ID, which read/respond/cancel/update/
-# delete/invite accept. Recurring meetings appear once per occurrence.
-
-# Upcoming events (default 10)
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh events
-
-# Today's events
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh today
-
-# This week
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh week
-
-# A specific date
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh day 2026-07-20
-
-# Find events by subject/location text (default: next 90 days)
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh search "board meeting"
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh search "dentist" 365
-
-# Read event details
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh read <event-id>
-
-# List calendars
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh calendars
-```
-
-### Creating Events
-
-```bash
-# Create event (dates in YYYY-MM-DDTHH:MM format). Without attendees, NOTHING
-# is sent to anyone - this is the safe "draft" step.
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh create "Meeting subject" "2025-02-05T14:00" "2025-02-05T15:00" "Conference Room A"
-
-# Quick 1-hour event
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh quick "Team standup" "2025-02-05T09:00"
-```
-
-### Inviting Attendees (two-step flow - REQUIRED for meetings)
-
-Mirror the email draft-then-send workflow: `create` the event with no attendees
-(nothing is sent), show the user the event details AND the attendee list, and
-only after explicit approval run `invite` - that is the moment invitations go
-out.
-
-```bash
-# Step 1: create the event (no attendees - nothing sent)
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh create "Project kickoff" "2025-02-05T14:00" "2025-02-05T15:00" "Teams"
-
-# Step 2: after the user approves, send the invitations.
-# Emails are comma/semicolon-separated; re-inviting an address is a no-op
-# (deduped case-insensitively), so invite can be run again to add people.
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh invite <event-id> "a@x.com, b@y.com"
-
-# Optional (non-required) attendees:
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh invite <event-id> "c@z.com" optional
-```
-
-One-shot alternative: `create` also accepts an attendee list as a sixth
-argument, but only with `--send-invites` on the command
-(`create <subject> <start> <end> [location] [attendees] --send-invites` - pass ""
-for location if there is none). This sends invitations IMMEDIATELY on creation,
-so only use it when the user has already approved the exact attendee list in
-this conversation. Without the flag, `create` refuses the attendees and creates
-nothing. When in doubt, use the two-step flow.
-
-### Invitations and Cancellation
-
-```bash
-# Respond to a meeting invitation (notifies the organiser)
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh respond <event-id> accept
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh respond <event-id> decline "Sorry, I have a clash"
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh respond <event-id> tentative
-
-# Cancel a meeting YOU organise (notifies all attendees).
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh cancel <event-id> "Postponed - new invite to follow"
-
-# Delete an event that notifies nobody: your own, or someone else's meeting.
-# Deleting a meeting you organise would send a cancellation, so it is refused;
-# use cancel for that.
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh delete <event-id>
-
-# Change a field. A meeting you organise sends every attendee an update, so
-# update refuses it and names who would hear. Show the user the change and that
-# list, and only after approval run it again with --notify-attendees.
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh update <event-id> start "2025-02-05T15:00"
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh update <event-id> start "2025-02-05T15:00" --notify-attendees
-```
-
-### Availability
-
-```bash
-# Check free/busy
-${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh free "2025-02-05T09:00" "2025-02-05T17:00"
-```
-
-## Workflow: Capturing Email to Notes
-
-When the user wants to capture an email into a notes vault or knowledge base:
-
-1. List emails to find the one to capture
-2. Read the full message content
-3. Check for attachments with `attachments` command
-4. Download any attachments (goes to `./inbox/`)
-5. Create a markdown file in the user's chosen notes/`inbox/` directory:
-
-```markdown
-# Email: [Subject]
-
-**From:** sender@example.com
-**Date:** YYYY-MM-DD HH:MM
-**Captured:** YYYY-MM-DD
-
-## Content
-[Email body]
-
-## Attachments
-- [[inbox/filename.pdf]] (captured)
-
-## Notes
-[User's annotations]
-```
-
-## Workflow: Processing Email Attachments
-
-When user wants to grab attachments from an email:
-
-1. Find the email: `inbox`, `search`, or `from` commands
-2. List attachments: `attachments <message-id>`
-3. Download: `download <message-id>` (all) or `download <message-id> <attachment-id>` (specific)
-4. Files land in `./inbox/` for processing
-5. User allocates files to appropriate areas during review
-
-## Workflow: Sending Email
-
-Always draft first, confirm, then send:
-
-1. Create draft with `draft` or `mddraft` command
-2. If sending as an alias, run `aliases` to get the exact address, then `update <draft-id> from <alias>`
-3. Show user the draft content - including the From line whenever it is not the primary address
-4. Wait for "send it" or change requests
-5. Update draft if needed
-6. Send with `send` command only after explicit approval
-
-## Workflow: Sending Email with Attachments
-
-1. Create draft with `draft` or `mddraft` command
-2. Add attachments with `attach <draft-id> <file-path>` (repeat for multiple files)
-3. Show user the draft details and attached files
-4. Wait for confirmation
-5. Send with `send` command only after explicit approval
-
-**Example:**
-```bash
-# Create draft
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh draft "bob@example.com" "Q4 Report" "Please find the report attached."
-# Output: Draft ID: xxxxxxxxxxxxxxxxxxxx
-
-# Attach files (can be called multiple times)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attach xxxxxxxxxxxxxxxxxxxx /path/to/report.pdf
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attach xxxxxxxxxxxxxxxxxxxx /path/to/data.xlsx
-
-# Send after user confirms
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send xxxxxxxxxxxxxxxxxxxx
-```
-
-## Workflow: Sending Follow-up / Chaser Emails
-
-When user wants to follow up on an email they sent:
-
-1. List sent items with `sent` command to find the original email
-2. Create follow-up with `followup <sent-id>` (uses default message) or provide custom body
-3. Show user the draft content
-4. Wait for confirmation or changes
-5. Send with `send` command only after explicit approval
-
-**Example:**
-```bash
-# Find the original sent email
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh sent 20
-
-# Create follow-up draft (default body)
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup abc123xyz
-
-# Or with custom message
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh followup abc123xyz "Hi, just checking in on this. Would be great to get your thoughts when you have a moment."
-
-# Send after user confirms
-${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send <draft-id>
-```
-
-## Workflow: Creating Calendar Events
-
-Always confirm before creating, and never send invitations without a second
-explicit approval:
-
-1. Parse user's request for: subject, start time, end time, location, attendees
-2. Show proposed event details to user
-3. Wait for confirmation or adjustments
-4. Create event only after explicit "yes" / approval - WITHOUT attendees
-5. If the meeting has attendees: show the attendee list, wait for explicit
-   approval, then send invitations with `invite <event-id> <emails>`
-
-## Error Handling
-
-- **Token expired**: Automatically refreshed on next call
-- **Permission denied**: ask the user to re-run setup to re-consent
-- **Network error**: Check connectivity, retry
-- **Throttled (HTTP 429)**: the scripts wait for Graph's `Retry-After` and retry up
-  to three times on their own. Do not loop the command yourself.
-- **batch-move failures**: it prints `FAILED <id>` for each message it did not
-  move and exits 1. Re-run it with just those IDs.
-
-## Setup
-
-**Ask the user to run setup. Do not run it yourself.** It opens a browser, needs a
-person to sign in, and waits for them to paste the URL the sign-in lands on. Give
-them the command:
-```bash
-${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh                 # the default account
-${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh --account work  # another mailbox
-```
-
-The app is a public client that signs in with PKCE, so there is no client secret to
-expire. An install from before that still has a secret in `config.json`; it keeps
-working, and running setup again moves it over.
-
-See `references/setup.md` for manual setup instructions.
+  `update ... --notify-attendees` may raise a permission prompt. That prompt is the user's
+  approval, so show them what will be sent first.
+- `create` refuses attendees without `--send-invites`. `update` refuses to change a meeting you
+  organise without `--notify-attendees`, and `delete` refuses one (use `cancel`).
+
+**6. Confirm the From address.** To send as an alias, get the exact address from `aliases`, set
+it with `update <draft-id> from <address>` (or `OUTLOOK_FROM_ADDRESS` for every draft), and
+show the user the From line before sending.
+
+**7. Setup is the user's.** If an account is not configured, or a refresh is refused because
+the sign-in has lapsed, ask the user to run `${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh`
+(add `--account <name>` for another mailbox). Do not run it yourself: it opens a browser and
+waits for a person to paste back a URL.
+
+## Command index
+
+Mail is `outlook-mail.sh <verb>`, calendar is `outlook-calendar.sh <verb>`. Add
+`--account <name>` before the verb for another mailbox. Listings print short IDs, which every
+command accepts. A message moved to another folder gets a new ID.
+
+**Read mail**
+- `inbox`, `unread`, `focused`, `sent`, `drafts`, `flagged` `[count]`: list, newest first
+- `folder <name> [count]`, `from <address> [count]`, `category <name> [count]`: list by folder, sender or category
+- `search <text or KQL> [count|all]`: search; KQL such as `subject:x AND from:y` works
+- `read <id>`: the whole message. `preview <id>`: a snippet, for navigation only
+- `thread <id>`: the conversation, oldest first. `stats`: inbox totals
+
+**Write mail** (all make drafts)
+- `draft <to> <subject> <body>`, `mddraft <to> <subject> <markdown> [--cc x] [--bcc y]`: a new draft; prefer `mddraft`
+- `reply <id> <body>`, `mdreply <id> <markdown>`: reply-all draft; prefer `mdreply`
+- `forward <id> <to> [markdown comment]`, `followup <sent-id> [markdown]`: forward, or chase your own sent mail
+- `update <draft-id> <field> <value>`: `subject`, `body`, `mdbody` (keeps the quoted chain), `to`, `cc`, `bcc`, `importance`, `from`
+- `aliases`: the addresses this mailbox can send as
+- `attach <draft-id> <file> [--inline <cid>]`: add a file, up to 150 MB
+- `signature <draft-id> <html-file>`: add an HTML signature; its local images go inline
+- `send <draft-id>`: sends; prints From, To, Cc, Bcc, subject and attachments first
+
+**Attachments**
+- `attachments <id>`: list. `download <id> [attachment-id]`: save to `./inbox/`
+
+**Organise mail**
+- `markread`, `markunread`, `flag`, `unflag`, `junk`, `notjunk`, `archive` `<id>`
+- `delete <id>`: to Deleted Items, where it can be restored
+- `move <id> <folder>`, `batch-move <folder> <ids...>` (or IDs on stdin): move; `Parent/Child` targets one folder
+- `categories`, `categorize <id> "<a, b>" | --add <c> | --remove <c>`: apply categories
+- `mkcategory <name> [colour]`, `rccategory <name> <colour>`, `rmcategory <name>`: the master list
+- `folders`, `subfolders [folder]`, `mkdir <name> [parent]`, `rename <old> <new>`, `rmdir <name> [--force]`: folders
+- `export <folder> <dir> [--since YYYY-MM-DD] [--count N]`: raw `.eml` for the outlook-to-md skill to archive
+
+**Calendar**
+- `events [count]`, `today`, `week`, `day <YYYY-MM-DD>`, `search <text> [days]`: list, with short IDs
+- `read <event-id>`, `calendars`, `free <start> <end>`: details, calendars, busy periods
+- `create <subject> <start> <end> [location]`, `quick <subject> <start>`: sends nothing
+- `invite <event-id> <emails> [optional]`: sends invitations
+- `respond <event-id> accept|decline|tentative [message]`: tells the organiser
+- `update <event-id> <field> <value> [--notify-attendees]`: subject, location, start or end
+- `cancel <event-id> [message]`: a meeting you organise; tells every attendee
+- `delete <event-id>`: removes an event that notifies nobody
+
+**Accounts** (`outlook-token.sh`)
+- `list`, `status`, `test`, `refresh`, `get`: accounts, connection, a valid token
+
+Times are `YYYY-MM-DDTHH:MM`. Markdown commands need `pandoc`. Throttling (HTTP 429) is
+retried by the scripts, so do not loop a command. `batch-move` prints `FAILED <id>` for each
+message it did not move; run it again with those IDs.

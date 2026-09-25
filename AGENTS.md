@@ -15,7 +15,7 @@ hooks/                            # Claude Code send gap: PreToolUse hook, ask r
 skills/outlook/SKILL.md     # the live mail/calendar skill (agent-facing)
 skills/outlook/scripts/     # bash scripts (jq + curl + az)
 skills/outlook/scripts/lib/ # graph.sh: token code shared by the scripts, sourced not run
-skills/outlook/references/  # manual setup guide (ships with the skill)
+skills/outlook/references/  # commands.md (full command reference) and setup.md (manual setup); ship with the skill
 skills/outlook-to-md/SKILL.md     # the offline archive skill (agent-facing)
 skills/outlook-to-md/scripts/     # outlook_to_md.py, run from its own .venv
 docs/                             # human-facing documentation, see docs/README.md
@@ -43,6 +43,9 @@ installed - so a fact needed at runtime belongs in the skill, not only in `docs/
   `dd`, `sed` or `stat` flag that only one of them has needs a fallback for the other, and
   no bash 4 features (associative arrays, `mapfile`, `${x,,}`). The `macos` CI job runs the
   offline suites with the Mac's own tools and `/bin/bash`.
+- `SKILL.md` loads in full on every trigger, so it keeps to the rules and a one-line command
+  index, under 1,500 words. The full syntax goes in `references/commands.md`. A new verb needs
+  a line in one of them; `docs_test.sh` fails otherwise.
 - House style: British English, plain hyphens.
 
 ## Validating a change
@@ -56,6 +59,7 @@ bash skills/outlook/tests/calendar_test.sh # calendar verbs against a fake curl
 bash skills/outlook/tests/mail_test.sh     # draft From and send summary against a fake curl
 bash skills/outlook/tests/graph_test.sh    # timeouts, 429/503 retries and batch-move failures
 bash skills/outlook/tests/setup_test.sh    # setup: public client, PKCE, no secret, the old-secret path
+bash skills/outlook/tests/docs_test.sh     # SKILL.md word limit and dashes; every verb documented
 bash skills/outlook/tests/send_gap_test.sh # read-only mode and the calendar send flags
 bash skills/outlook/tests/send_gate_test.sh # the hook, the ask rules and their installer
 python3 -m pytest skills/outlook-to-md/tests/ -q # archive suite (no PST needed)

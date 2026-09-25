@@ -71,7 +71,7 @@ delegated over application permissions.
 
 ### On the "sensitive file access" findings
 
-Automated scanners flag the lines in `SKILL.md` that name
+Automated scanners flag the lines in the skill's docs that name
 `~/.dbhq/outlook/<account>/` as "access to home directory dotfiles". Those are
 sentences of documentation, not code - they describe where credentials live so
 you can find, inspect and delete them.

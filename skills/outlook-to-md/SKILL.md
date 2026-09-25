@@ -65,7 +65,7 @@ ${CLAUDE_SKILL_DIR}/.venv/bin/python ${CLAUDE_SKILL_DIR}/scripts/outlook_to_md.p
 ### Keeping an Archive Current from Live Mail
 
 A PST is a snapshot. To carry an archive forward, export new mail with the
-sibling `outlook` skill and append it — the two produce the same shape.
+sibling `outlook` skill and append it: the two produce the same shape.
 
 ```bash
 # 1. Export live mail as .eml (needs outlook configured)
@@ -81,13 +81,13 @@ ${CLAUDE_SKILL_DIR}/.venv/bin/python ${CLAUDE_SKILL_DIR}/scripts/outlook_to_md.p
 
 Deduplication is by `Message-ID`, so a `--since` window that overlaps what is
 already archived costs bandwidth and nothing else. Graph-sourced mail is
-recorded under the `pst_folder` index column like any other — the column means
+recorded under the `pst_folder` index column like any other; the column means
 "the folder this message came from", and always did.
 
 This guarantee depends on the message actually carrying a `Message-ID`
 header. Received mail always has one, but a message with none (some drafts,
 some malformed mail) has no key to dedupe on and is re-archived as a fresh
-entry on every overlapping run. Narrow in practice, but real — there is no
+entry on every overlapping run. Narrow in practice, but real: there is no
 content-hash fallback.
 
 ### Extract from Pre-Extracted .eml Directory
