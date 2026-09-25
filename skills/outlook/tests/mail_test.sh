@@ -12,6 +12,8 @@
 # followup and forward create, and `send` shows From, To, Cc, Bcc, Subject and
 # the attachments before it posts, and posts nothing if it cannot read them.
 # `delete` and `rmdir` move to Deleted Items and never send a DELETE.
+# `attach --inline` and `signature` upload inline images, and `update mdbody`
+# keeps a signature block.
 set -u
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,11 +40,13 @@ cat > "$TMP/bin/curl" <<'FAKE'
 #!/bin/bash
 url="" method=GET data="" prev=""
 for a in "$@"; do
-  case "$prev" in -X) method="$a" ;; -d) data="$a" ;; esac
+  case "$prev" in -X) method="$a" ;; -d|--data-binary) data="$a" ;; esac
   case "$a" in https://*) url="$a" ;; esac
   prev="$a"
 done
 printf '%s %s\n' "$method" "$url" >> "$FAKE_CURL_LOG"
+# A body sent as @file (the attachment upload) is read from the file.
+case "$data" in @*) data=$(cat "${data#@}") ;; esac
 [ -n "$data" ] && printf 'BODY %s\n' "$(printf '%s' "$data" | jq -c .)" >> "$FAKE_CURL_LOG"
 path="${url#https://graph.microsoft.com/v1.0}"
 case "$method $path" in
@@ -194,6 +198,109 @@ has "rmdir says where the folder went" "Moved folder 'Old Projects' to Deleted I
 out=$(mail "" rmdir "Old Projects"); rc=$?
 eq "rmdir of an empty folder needs no --force" "1" "$(grep -c '^POST .*/mailFolders/FOLDER1/move$' "$FAKE_CURL_LOG")"
 eq "rmdir of an empty folder sends no DELETE" "0" "$(grep -c '^DELETE ' "$FAKE_CURL_LOG" || true)"
+
+########################################
+# attach --inline and signature
+########################################
+IMG="$TMP/img"
+mkdir -p "$IMG/icons"
+printf 'PNGDATA-logo' > "$IMG/logo.png"
+printf 'PNGDATA-phone' > "$IMG/icons/phone.png"
+b64() { base64 < "$1" | tr -d '\n'; }
+posted_attachments() {  # the JSON body of every attachment POST, one per line
+    grep -A1 "^POST https://graph.microsoft.com/v1.0/me/messages/$DRAFT_ID/attachments\$" "$FAKE_CURL_LOG" | sed -n 's/^BODY //p'
+}
+patched_body() {  # the body of the last PATCH, on one line
+    grep -A1 "^PATCH https://graph.microsoft.com/v1.0/me/messages/$DRAFT_ID\$" "$FAKE_CURL_LOG" | sed -n 's/^BODY //p' \
+        | tail -1 | jq -r '.body.content' | tr '\n' ' '
+}
+printf '%s' '{"value":[]}' > "$FAKE_ATTACHMENTS"
+
+out=$(mail "" attach "$DRAFT_ID" "$IMG/logo.png" --inline logo); rc=$?
+eq "attach --inline exits 0" "0" "$rc"
+eq "attach --inline posts isInline, the content ID and the bytes" "true|logo|logo.png|$(b64 "$IMG/logo.png")" \
+   "$(posted_attachments | jq -r '"\(.isInline)|\(.contentId)|\(.name)|\(.contentBytes)"')"
+has "attach --inline says it is inline" "(inline, cid:logo)" "$out"
+
+out=$(mail "" attach "$DRAFT_ID" --inline logo "$IMG/logo.png")
+eq "--inline may come before the file" "logo" "$(posted_attachments | jq -r '.contentId')"
+
+out=$(mail "" attach "$DRAFT_ID" "$IMG/logo.png")
+eq "attach without --inline is an ordinary attachment" "false|none" \
+   "$(posted_attachments | jq -r '"\(has("isInline"))|\(.contentId // "none")"')"
+
+# Over 3 MB the upload goes through a session, which has to say inline too.
+head -c 3200000 /dev/zero > "$IMG/big.bin"
+out=$(mail "" attach "$DRAFT_ID" "$IMG/big.bin" --inline big)
+eq "a large inline file opens an inline upload session" "true|big|big.bin" \
+   "$(grep -A1 '/attachments/createUploadSession$' "$FAKE_CURL_LOG" | sed -n 's/^BODY //p' | jq -r '.AttachmentItem | "\(.isInline)|\(.contentId)|\(.name)"')"
+
+out=$(mail "" attach "$DRAFT_ID" "$IMG/logo.png" --inline "a b"); rc=$?
+eq "a content ID with a space is refused" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
+eq "a refused content ID uploads nothing" "0" "$(posted_attachments | grep -c . || true)"
+
+# A reply draft: new message, the chain marker, then the quoted chain, which
+# carries a signature block of its own from an earlier message.
+CHAIN='<span data-mdreply-chain-start="1"></span>'
+S_START='<span data-outlook-signature-start="1"></span>'
+S_END='<span data-outlook-signature-end="1"></span>'
+reply_body="<div>Thanks, see you then.</div><br/>${CHAIN}<p>quoted</p>${S_START}<p>OLD QUOTED SIG</p>${S_END}"
+jq -n --arg id "$DRAFT_ID" --arg b "$reply_body" '{id: $id, body: {contentType: "html", content: $b}}' > "$FAKE_DRAFT_READ"
+cat > "$IMG/sig.html" <<'HTML'
+<table><tr><td><img src="logo.png" alt="DBHQ"></td>
+<td>Dan<br><img src='icons/phone.png'> 01234<br><img src="https://example.com/remote.png"><img src="cid:kept"></td></tr></table>
+HTML
+
+out=$(mail "" signature "$DRAFT_ID" "$IMG/sig.html"); rc=$?
+eq "signature exits 0" "0" "$rc"
+eq "signature uploads each local image once, inline" "2" "$(posted_attachments | jq -s '[.[] | select(.isInline == true)] | length')"
+eq "signature uploads the right bytes under each content ID" \
+   "sig-1-phone.png=$(b64 "$IMG/icons/phone.png") sig-2-logo.png=$(b64 "$IMG/logo.png")" \
+   "$(posted_attachments | jq -r '"\(.contentId)=\(.contentBytes)"' | sort | tr '\n' ' ' | sed 's/ $//')"
+body=$(patched_body)
+has "signature points the logo at its cid" 'src="cid:sig-2-logo.png"' "$body"
+has "signature points the icon at its cid" "src='cid:sig-1-phone.png'" "$body"
+has "signature leaves a remote image alone" 'src="https://example.com/remote.png"' "$body"
+has "signature leaves an existing cid alone" 'src="cid:kept"' "$body"
+eq "the block sits between the message and the chain" "1" \
+   "$(printf '%s' "$body" | awk -v s="$S_START" -v c="$CHAIN" '{a=index($0,"see you then"); b=index($0,s); d=index($0,c)} END{print (a && b && d && a < b && b < d) ? 1 : 0}')"
+has "the quoted chain is untouched" "${CHAIN}<p>quoted</p>${S_START}<p>OLD QUOTED SIG</p>${S_END}" "$body"
+
+# Run again on the draft as it now is: the block is replaced, not doubled, and
+# images already inline are not uploaded again.
+jq -n --arg id "$DRAFT_ID" --arg b "$body" '{id: $id, body: {contentType: "html", content: $b}}' > "$FAKE_DRAFT_READ"
+printf '%s' '{"value":[{"contentId":"sig-1-phone.png","isInline":true},{"contentId":"sig-2-logo.png","isInline":true}]}' > "$FAKE_ATTACHMENTS"
+out=$(mail "" signature "$DRAFT_ID" "$IMG/sig.html")
+eq "a second run uploads nothing" "0" "$(posted_attachments | grep -c . || true)"
+eq "a second run leaves one block before the chain" "1" \
+   "$(patched_body | awk -v c="$CHAIN" '{print substr($0, 1, index($0, c))}' | grep -o 'data-outlook-signature-start' | wc -l | tr -d ' ')"
+printf '%s' '{"value":[]}' > "$FAKE_ATTACHMENTS"
+
+# update mdbody keeps the block and the chain. It used to keep only the chain,
+# so the signature was silently dropped on the first edit.
+sig_draft="<div>Thanks, see you then.</div><br/>${S_START}<p>Dan</p><img src=\"cid:sig-2-logo.png\">${S_END}<br/>${CHAIN}<p>quoted</p>${S_START}<p>OLD QUOTED SIG</p>${S_END}"
+jq -n --arg id "$DRAFT_ID" --arg b "$sig_draft" '{id: $id, body: {contentType: "html", content: $b}}' > "$FAKE_DRAFT_READ"
+out=$(mail "" update "$DRAFT_ID" mdbody "Rewritten **reply**")
+new=$(patched_body)
+has "update mdbody writes the new text" "<strong>reply</strong>" "$new"
+eq "update mdbody replaces the old text" "gone" "$([ "${new#*see you then}" = "$new" ] && echo gone || echo kept)"
+has "update mdbody keeps the signature block" "${S_START}<p>Dan</p><img src=\"cid:sig-2-logo.png\">${S_END}" "$new"
+has "update mdbody keeps the chain" "${CHAIN}<p>quoted</p>${S_START}<p>OLD QUOTED SIG</p>${S_END}" "$new"
+eq "update mdbody puts the block before the chain" "1" \
+   "$(printf '%s' "$new" | awk -v s="$S_START" -v c="$CHAIN" '{a=index($0,"<strong>reply"); b=index($0,s); d=index($0,c)} END{print (a && b && d && a < b && b < d) ? 1 : 0}')"
+
+# A plain-text draft, a missing image: nothing is uploaded or changed.
+jq -n --arg id "$DRAFT_ID" '{id: $id, body: {contentType: "text", content: "plain"}}' > "$FAKE_DRAFT_READ"
+out=$(mail "" signature "$DRAFT_ID" "$IMG/sig.html"); rc=$?
+eq "signature on a plain-text draft exits non-zero" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
+eq "signature on a plain-text draft changes nothing" "0" "$(grep -c '^\(POST\|PATCH\) ' "$FAKE_CURL_LOG" || true)"
+
+jq -n --arg id "$DRAFT_ID" --arg b "$reply_body" '{id: $id, body: {contentType: "html", content: $b}}' > "$FAKE_DRAFT_READ"
+printf '<img src="logo.png"><img src="missing.png">' > "$IMG/broken.html"
+out=$(mail "" signature "$DRAFT_ID" "$IMG/broken.html"); rc=$?
+eq "a missing image makes signature exit non-zero" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
+has "a missing image is named" "missing.png" "$out"
+eq "a missing image uploads and changes nothing" "0" "$(grep -c '^\(POST\|PATCH\) ' "$FAKE_CURL_LOG" || true)"
 
 echo "-----------------------------"
 printf 'PASS=%d FAIL=%d\n' "$PASS" "$FAIL"

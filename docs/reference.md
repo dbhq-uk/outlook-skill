@@ -96,7 +96,8 @@ knowledge of it.
 |---|---|
 | `attachments <id>` | List |
 | `download <id> [attachment-id]` | All, or one. Saves to `inbox/` under `$CLAUDE_PROJECT_DIR`, else the current directory |
-| `attach <draft-id> <file>` | One file per call, repeat for more |
+| `attach <draft-id> <file> [--inline <cid>]` | One file per call, repeat for more. `--inline` uploads it as an inline image the body shows with `<img src="cid:<cid>">` |
+| `signature <draft-id> <html-file>` | Adds an HTML signature to an HTML draft, above the quoted chain. Each `<img>` whose quoted `src` is a local file is uploaded inline and pointed at by `cid:`. Running it again replaces the block; `update mdbody` keeps it |
 
 Under 3 MB, `attach` sends a single base64 upload. At or above 3 MB it opens a Graph upload
 session and streams 4 MB chunks with a progress indicator, which is what carries files up to
