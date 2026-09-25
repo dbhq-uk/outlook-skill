@@ -472,12 +472,18 @@ class EmailExtractor:
     def readpst_command(self, out_dir: Path) -> list:
         """The readpst command line for this extraction.
 
+        -j 0 turns off readpst's parallel jobs. With -e, readpst may split one
+        folder's messages across jobs, and then it sometimes never writes the
+        last few, with no error and a zero exit. Measured on the same PST with
+        readpst 0.6.76: 70 or 71 messages by default, 71 every time with -j 0.
+        An archive that silently drops mail is worse than a slower one.
+
         -e writes each message as its own .eml file inside a folder tree that
         mirrors the PST, which is what _process_eml_directory reads. -8 asks
         for UTF-8 bodies where the PST holds them. -D includes deleted items,
         and is passed only when --include-deleted is given.
         """
-        cmd = ['readpst', '-e', '-8']
+        cmd = ['readpst', '-j', '0', '-e', '-8']
         if self.include_deleted:
             cmd.append('-D')
         cmd += ['-o', str(out_dir), str(self.pst_path)]
@@ -494,7 +500,7 @@ class EmailExtractor:
             print("     macOS: brew install libpst")
             print()
             print("  2. Run readpst on another machine, then point this tool at its output:")
-            print(f"     readpst -e -8 -o extracted_emails/ {self.pst_path.name}")
+            print(f"     readpst -j 0 -e -8 -o extracted_emails/ {self.pst_path.name}")
             print("     python outlook_to_md.py extracted_emails/ <output_dir>")
             sys.exit(1)
 

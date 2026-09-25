@@ -177,10 +177,18 @@ jobs:
   #
   # The PST is the public Enron sample that pst-extractor (MIT) ships as test
   # data. It is fetched at a pinned commit and checked against its hash, so it
-  # cannot change under the test. It holds about 70 messages in 5 folders, most
-  # with an attachment. The exact count readpst recovers varies by one or two
-  # between pst-utils builds, so the floors below leave room for that and no
-  # more: a backend that loses messages or attachments still fails.
+  # cannot change under the test. readpst 0.6.76 recovers 71 messages in 5
+  # folders from it, with 70 attachments, every time.
+  #
+  # It did not always. The count used to vary between runs of the same readpst
+  # build, from 67 to 71, with "Errors: 0". The cause was readpst's parallel
+  # jobs: with -e it may split one folder's messages across jobs, and then it
+  # sometimes never writes the last few. It exits 0 and says nothing. The tool
+  # now runs readpst with -j 0, which turns the jobs off, and the same PST gave
+  # 71 in every one of 75 local runs (the default gave 68 to 71). So the floors
+  # below are the full count: a run that loses one message fails. If a new
+  # pst-utils build recovers a different number, look at why before moving
+  # them.
   outlook-to-md-pst:
     name: outlook-to-md (real PST, py3.13)
     runs-on: ubuntu-latest
@@ -208,6 +216,34 @@ jobs:
             "https://raw.githubusercontent.com/epfromer/pst-extractor/7d08ef9bc7112c23275fa948306c76bba6e24fba/src/__tests__/testdata/enron.pst"
           echo "6152489de3472be6f1f840935d34b6dbf5f62b025dd015929ea9cf66eb5a5b46  $RUNNER_TEMP/enron.pst" | sha256sum -c -
 
+      # The tool's own readpst command, three times. If the three file lists
+      # differ, readpst is dropping messages at random again, and the counts
+      # in the next step would be measuring luck.
+      - name: readpst writes the same files on every run
+        run: |
+          python - "$RUNNER_TEMP/enron.pst" "$RUNNER_TEMP/determinism" <<'PY'
+          import subprocess, sys
+          from pathlib import Path
+          sys.path.insert(0, "skills/outlook-to-md/scripts")
+          import outlook_to_md
+          pst, base = Path(sys.argv[1]), Path(sys.argv[2])
+          ex = outlook_to_md.EmailExtractor(pst_path=pst, output_dir=base / "unused")
+          lists = []
+          for i in range(3):
+              out = base / f"run{i}"
+              out.mkdir(parents=True)
+              cmd = ex.readpst_command(out)
+              subprocess.run(cmd, check=True, capture_output=True)
+              lists.append(sorted(str(p.relative_to(out)) for p in out.rglob("*.eml")))
+          print(" ".join(cmd[:-3]), "wrote", [len(files) for files in lists], ".eml files")
+          for i in (1, 2):
+              assert lists[i] == lists[0], (
+                  f"run {i} differs from run 0: "
+                  f"missing {sorted(set(lists[0]) - set(lists[i]))}, "
+                  f"extra {sorted(set(lists[i]) - set(lists[0]))}"
+              )
+          PY
+
       - name: Convert it, then check the emails, folders and attachments
         run: |
           python skills/outlook-to-md/scripts/outlook_to_md.py "$RUNNER_TEMP/enron.pst" "$RUNNER_TEMP/archive"
@@ -220,9 +256,9 @@ jobs:
           attachments = sum(int(r["attachment_count"]) for r in rows)
           log = (out / "extraction_log.txt").read_text()
           print(f"{len(rows)} emails, {len(folders)} folders, {attachments} attachments")
-          assert len(rows) >= 68, f"expected about 70 emails, got {len(rows)}"
+          assert len(rows) >= 71, f"expected 71 emails, got {len(rows)}"
           assert len(folders) == 5, f"expected 5 folders, got {sorted(folders)}"
-          assert attachments >= 55, f"expected about 60 attachments or more, got {attachments}"
+          assert attachments >= 70, f"expected 70 attachments, got {attachments}"
           assert "  Errors: 0" in log, log
           assert len(list((out / "emails").rglob("email.md"))) == len(rows)
           # Every frontmatter block parses as YAML, on real mail.
