@@ -68,7 +68,7 @@ mail.sh search 'from:acme.com AND body:renewal' all
 | `forward <id> <to-emails> [markdown-comment]` | Quoted message and its attachments |
 | `followup <sent-id> [markdown-body]` | Chaser on your own sent message. **Reply-all** |
 | `update <draft-id> <field> <value>` | See below |
-| `send <draft-id>` | The only verb that sends |
+| `send <draft-id>` | The only verb that sends. Prints From, To, Cc, Bcc, Subject and attachments first, read back from Graph |
 | `aliases` | Addresses this mailbox may send as |
 
 Recipient lists are comma- or semicolon-separated. Nothing is sent until `send`.
@@ -258,7 +258,7 @@ thousand messages takes five to fifteen minutes.
 |---|---|
 | `OUTLOOK_ACCOUNT` | Account to use, unless `--account` is given. Default `default` |
 | `OUTLOOK_TZ` | Timezone for every calendar time. Falls back to `/etc/timezone`, `timedatectl`, the `/etc/localtime` symlink, then `Europe/London` |
-| `OUTLOOK_FROM_ADDRESS` | Default From on new `draft` and `mddraft` only. Replies need `update from` |
+| `OUTLOOK_FROM_ADDRESS` | Default From on every draft: `draft`, `mddraft`, `reply`, `mdreply`, `followup`, `forward`. `update from` overrides it on one draft |
 | `OUTLOOK_FROM_NAME` | Usually ignored - Exchange overrides the display name for addresses the mailbox owns |
 | `CLAUDE_PROJECT_DIR` | Where `download` writes its `inbox/` directory. Falls back to the current directory |
 

@@ -224,15 +224,16 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mdreply <message-id> "**Thanks** - s
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh update <draft-id> from "alias@example.com"
 ```
 
-To default every new `draft` / `mddraft` to an alias, set `OUTLOOK_FROM_ADDRESS` (these apply only to the two create commands, not to replies — use `update from` for those):
+To default every draft to an alias, set `OUTLOOK_FROM_ADDRESS`. It applies to every command that makes a draft: `draft`, `mddraft`, `reply`, `mdreply`, `followup` and `forward`. Each prints the From it set. `update from` still overrides it on one draft:
 
 ```bash
 OUTLOOK_FROM_ADDRESS="alias@example.com" ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh draft "to@example.com" "Subject" "Body"
+OUTLOOK_FROM_ADDRESS="alias@example.com" ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mdreply <message-id> "Thanks"
 ```
 
 Rules and behaviour:
 
-1. **Always confirm the From line with the user before sending as an alias.** Which identity a message goes out as is as consequential as who receives it — `update from` and `send` both print the From address, so check it.
+1. **Always confirm the From line with the user before sending as an alias.** Which identity a message goes out as is as consequential as who receives it. Every draft command and `update from` print the From address, and `send` reads the draft back and prints From, To, Cc, Bcc, Subject and attachments before it posts. If `OUTLOOK_FROM_ADDRESS` is set and the draft would go from a different address, `send` warns.
 2. **Tenant support is required.** Send-from-alias only works when the tenant has `SendFromAliasEnabled` set (`Set-OrganizationConfig -SendFromAliasEnabled $true`). Without it, Exchange silently rewrites the From back to the primary address — so verify a test send actually arrived as the alias before relying on it.
 3. **An unrecognised address warns rather than blocks**, because SendAs rights on a *shared* mailbox are real but never appear in this mailbox's alias list. If the address genuinely is not permitted, `send` fails with `ErrorSendAsDenied` and nothing is sent — a wrong alias cannot leak out.
 4. **`OUTLOOK_FROM_NAME` is usually ignored.** Exchange overrides the display name with the mailbox's own for addresses it owns; the address is what changes.

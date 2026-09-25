@@ -85,11 +85,14 @@ mail.sh update <draft-id> from "dan@example.com"
 mail.sh send <draft-id>
 ```
 
-Both `update from` and `send` print the From address. Which identity a message goes out as
-matters as much as who receives it, so confirm it before sending.
+Every draft command and `update from` print the From address. `send` reads the draft back
+from Graph and prints From, To, Cc, Bcc, Subject and the attachment names before it posts, and
+if it cannot read the draft it sends nothing. Which identity a message goes out as matters as
+much as who receives it, so confirm it before sending.
 
-To default every new `draft` and `mddraft` to an alias, export `OUTLOOK_FROM_ADDRESS`. It
-applies to those two create commands only; replies and forwards still need `update from`.
+To default every draft to an alias, export `OUTLOOK_FROM_ADDRESS`. It applies to `draft`,
+`mddraft`, `reply`, `mdreply`, `followup` and `forward`, and each prints the From it set. If the
+variable is set and a draft would still go from another address, `send` warns.
 
 Three things to know before relying on this:
 
