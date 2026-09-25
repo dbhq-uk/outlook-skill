@@ -1,5 +1,6 @@
 # shellcheck shell=bash
-# Shared token handling for the outlook scripts. Sourced, never run.
+# Shared token handling and the read-only gate for the outlook scripts.
+# Sourced, never run.
 #
 # outlook-mail.sh, outlook-calendar.sh and outlook-token.sh each carried their
 # own copy of this code, and a bug in it (a failed refresh wrote an empty
@@ -152,4 +153,38 @@ refresh_access_token() {
 ensure_valid_token() {
     outlook_cached_token && return 0
     _outlook_with_token_lock _outlook_refresh_if_stale
+}
+
+# --- Read-only mode ------------------------------------------------------------
+# OUTLOOK_READ_ONLY=1 makes every command that could change the mailbox or send
+# anything refuse, before a token is read or a request is made. It suits a
+# triage session: the agent can list and read, and nothing else.
+#
+# It is an allow-list. Each script names the verbs that only read, and every
+# other verb is refused. A verb added later is therefore refused in read-only
+# mode until somebody decides it only reads, which is the safe way round.
+#
+# Any value other than empty, 0, false, no or off turns it on, so a user who
+# writes OUTLOOK_READ_ONLY=true gets the protection they asked for.
+outlook_read_only() {
+    case "$(printf '%s' "${OUTLOOK_READ_ONLY:-}" | tr '[:upper:]' '[:lower:]')" in
+        ""|0|false|no|off) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# outlook_read_only_gate <script> <verb> <read-only verb>...
+# Returns 0 when the command may run, 1 (with the reason on stderr) when it may
+# not. The usage text, printed for no verb or for help, reads nothing.
+outlook_read_only_gate() {
+    local script="$1" verb="$2" v
+    shift 2
+    outlook_read_only || return 0
+    case "$verb" in ""|help|-h|--help) return 0 ;; esac
+    for v in "$@"; do
+        [ "$verb" = "$v" ] && return 0
+    done
+    echo "Refused: OUTLOOK_READ_ONLY is set, and '$script $verb' is not a read-only command." >&2
+    echo "Nothing was sent to Microsoft Graph. Unset OUTLOOK_READ_ONLY to run it." >&2
+    return 1
 }

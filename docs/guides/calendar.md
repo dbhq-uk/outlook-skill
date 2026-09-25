@@ -74,10 +74,11 @@ calendar.sh invite <event-id> "c@example.com" optional
 That is the moment mail goes out. Re-inviting an address already on the event is a no-op,
 deduped case-insensitively, so `invite` is safe to run again to add someone.
 
-`create` does accept attendees as a sixth argument - `create <subject> <start> <end>
-[location] [attendees]`, with `""` for an absent location. That form sends invitations
-**immediately on creation**, with no gap in which to check the list. Use it only when the
-exact addresses have already been approved.
+`create` does accept attendees as a sixth argument, but only with `--send-invites` on the
+command - `create <subject> <start> <end> [location] [attendees] --send-invites`, with `""` for
+an absent location. That form sends invitations **immediately on creation**, with no gap in
+which to check the list, so without the flag `create` refuses the attendees and creates nothing.
+Use it only when the exact addresses have already been approved.
 
 A one-hour event with no location, for when the meeting is with yourself:
 
@@ -94,6 +95,11 @@ calendar.sh update <event-id> start "2026-08-14T14:00"
 
 Updatable fields are `subject`, `location`, `start` and `end`.
 
+Changing a meeting you organise sends every attendee an update, so `update` refuses one unless
+`--notify-attendees` is on the command, and names who would hear. Confirm the change, then run
+it again with the flag. Your own events, and meetings someone else organises, need no flag,
+because nobody else is told.
+
 Moving an event to a different day takes two calls, and the order matters: Graph rejects a
 `start` later than the event's current `end`, and an `end` earlier than its current `start`.
 Set whichever bound keeps start before end first.
@@ -106,8 +112,10 @@ calendar.sh delete <event-id>
 ```
 
 `cancel` is for meetings you organise: it withdraws the meeting and tells every attendee, with
-your comment. `delete` removes the event silently. Deleting a meeting other people have in
-their calendars leaves it in theirs - use `cancel` whenever anyone else is involved.
+your comment. `delete` is for an event that notifies nobody: your own, or a meeting someone else
+organises, which leaves it in their calendar and everyone else's. Deleting a meeting you
+organise would send the attendees a cancellation, so `delete` refuses one and points you at
+`cancel`, which does the same thing and says so.
 
 ## Answering an invitation
 

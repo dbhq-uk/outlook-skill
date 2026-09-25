@@ -94,6 +94,20 @@ Calendar timezone is auto-detected from the system. Override with `OUTLOOK_TZ`, 
 
 **Note:** Tokens are automatically refreshed when needed. No manual intervention required.
 
+## Refusals and permission prompts
+
+Some commands refuse on purpose, and some make Claude Code ask the user first.
+Both are the send gap working. Never work around either one, for example by
+calling Graph with curl yourself or by rewriting the command so it is not
+recognised.
+
+- `OUTLOOK_READ_ONLY=1` refuses every command that writes or sends. Only
+  listings and reads run. If a command refuses for this reason, tell the user;
+  do not unset the variable.
+- `send`, `invite`, `respond`, `cancel`, `create ... --send-invites` and
+  `update ... --notify-attendees` may raise a permission prompt. That prompt is
+  the user's approval. Show them what will be sent before you run the command.
+
 ## Email Operations
 
 ### Reading Email
@@ -456,10 +470,12 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh invite <event-id> "c@z.com" opti
 ```
 
 One-shot alternative: `create` also accepts an attendee list as a sixth
-argument (`create <subject> <start> <end> [location] [attendees]` - pass "" for
-location if there is none). This sends invitations IMMEDIATELY on creation, so
-only use it when the user has already approved the exact attendee list in this
-conversation. When in doubt, use the two-step flow.
+argument, but only with `--send-invites` on the command
+(`create <subject> <start> <end> [location] [attendees] --send-invites` - pass ""
+for location if there is none). This sends invitations IMMEDIATELY on creation,
+so only use it when the user has already approved the exact attendee list in
+this conversation. Without the flag, `create` refuses the attendees and creates
+nothing. When in doubt, use the two-step flow.
 
 ### Invitations and Cancellation
 
@@ -469,10 +485,19 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh respond <event-id> accept
 ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh respond <event-id> decline "Sorry, I have a clash"
 ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh respond <event-id> tentative
 
-# Cancel a meeting YOU organise (notifies all attendees); `delete` removes an
-# event silently. Use cancel for meetings with attendees, delete for your own
-# solo events.
+# Cancel a meeting YOU organise (notifies all attendees).
 ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh cancel <event-id> "Postponed - new invite to follow"
+
+# Delete an event that notifies nobody: your own, or someone else's meeting.
+# Deleting a meeting you organise would send a cancellation, so it is refused;
+# use cancel for that.
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh delete <event-id>
+
+# Change a field. A meeting you organise sends every attendee an update, so
+# update refuses it and names who would hear. Show the user the change and that
+# list, and only after approval run it again with --notify-attendees.
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh update <event-id> start "2025-02-05T15:00"
+${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh update <event-id> start "2025-02-05T15:00" --notify-attendees
 ```
 
 ### Availability

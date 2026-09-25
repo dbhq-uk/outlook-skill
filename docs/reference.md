@@ -146,13 +146,13 @@ exists.
 | `search <text> [days]` | Subject and location, default next 90 days |
 | `read <id>` | Details, including attendees and responses |
 | `calendars` | |
-| `create <subject> <start> <end> [location] [attendees]` | Without attendees, **nothing is sent**. With them, invitations go out immediately |
+| `create <subject> <start> <end> [location] [attendees --send-invites]` | Without attendees, **nothing is sent**. Attendees need `--send-invites`, because the invitations go out immediately; without it `create` refuses and creates nothing |
 | `invite <id> <emails> [required\|optional]` | Sends invitations. Re-inviting an address is a no-op |
 | `quick <subject> <start>` | One hour, no location |
-| `update <id> <field> <value>` | `subject`, `location`, `start`, `end` |
+| `update <id> <field> <value> [--notify-attendees]` | `subject`, `location`, `start`, `end`. A meeting you organise sends every attendee an update, so it needs `--notify-attendees` |
 | `respond <id> <accept\|decline\|tentative> [comment]` | Notifies the organiser |
 | `cancel <id> [comment]` | Withdraws a meeting you organise and tells attendees |
-| `delete <id>` | Removes the event silently |
+| `delete <id>` | For an event that notifies nobody. A meeting you organise is refused, because deleting it sends a cancellation: use `cancel` |
 | `free <start> <end>` | Free, or what is in the way |
 
 Every listing prints each event's short ID (the last 20 characters) and caches the full IDs,
@@ -260,6 +260,7 @@ thousand messages takes five to fifteen minutes.
 | `OUTLOOK_TZ` | Timezone for every calendar time. Falls back to `/etc/timezone`, `timedatectl`, the `/etc/localtime` symlink, then `Europe/London` |
 | `OUTLOOK_FROM_ADDRESS` | Default From on every draft: `draft`, `mddraft`, `reply`, `mdreply`, `followup`, `forward`. `update from` overrides it on one draft |
 | `OUTLOOK_FROM_NAME` | Usually ignored - Exchange overrides the display name for addresses the mailbox owns |
+| `OUTLOOK_READ_ONLY` | Set to `1` and every command that writes or sends refuses before any request is made. Only the listings and reads run. Empty, `0`, `false`, `no` and `off` leave it off |
 | `CLAUDE_PROJECT_DIR` | Where `download` writes its `inbox/` directory. Falls back to the current directory |
 
 ## Files on disk

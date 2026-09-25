@@ -55,7 +55,10 @@ grant - do both.
 
 The skill can read, send and move mail, and create and delete calendar events.
 That is the point of it, but it means an agent running this skill can send email
-as you. The permissions granted are those on the app registration you create
+as you. `OUTLOOK_READ_ONLY=1` stops every command that writes or sends, and under
+Claude Code the plugin's hook and the ask rules `install.sh` offers make it ask
+you before a command that sends. See `docs/architecture.md`, "The send gap", for
+what each of these does not cover. The permissions granted are those on the app registration you create
 during setup: grant only the Graph scopes you actually need, and prefer
 delegated over application permissions.
 

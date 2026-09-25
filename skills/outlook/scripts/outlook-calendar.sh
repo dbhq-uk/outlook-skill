@@ -80,12 +80,6 @@ case "$DEFAULT_TIMEZONE" in
         ;;
 esac
 
-# Check credentials
-if [ ! -f "$CREDS_FILE" ]; then
-    echo "Error: Account '$ACCOUNT' not configured. Run: outlook-setup.sh --account $ACCOUNT"
-    exit 1
-fi
-
 # --- Token management -------------------------------------------------------
 # The token code lives in lib/graph.sh, shared by every script, so a fix to it
 # lands once. The access token is resolved from a locally-stored absolute expiry
@@ -106,6 +100,19 @@ OUTLOOK_SCRIPT_DIR=$(cd -P "$(dirname "$_self")" && pwd)
 unset _self _dir
 # shellcheck source=lib/graph.sh
 . "$OUTLOOK_SCRIPT_DIR/lib/graph.sh"
+
+# Read-only mode: with OUTLOOK_READ_ONLY set, only these verbs run. Every
+# other verb refuses here, before a token is read or a request is made. See
+# outlook_read_only_gate in lib/graph.sh. A new verb that only reads belongs in
+# this list; one that writes or sends must stay out of it.
+READ_ONLY_VERBS=(events today week read calendars day search free)
+outlook_read_only_gate outlook-calendar.sh "${1:-}" "${READ_ONLY_VERBS[@]}" || exit 1
+
+# Check credentials
+if [ ! -f "$CREDS_FILE" ]; then
+    echo "Error: Account '$ACCOUNT' not configured. Run: outlook-setup.sh --account $ACCOUNT"
+    exit 1
+fi
 
 # A failed refresh has already said why on stderr, and left credentials.json
 # as it was.
@@ -351,6 +358,22 @@ resolve_event_id() {
     printf '%s' "$matches"
 }
 
+# If the event is a meeting the user organises and has attendees, print the
+# attendees' addresses, comma-separated. Prints nothing for the user's own
+# event or for someone else's meeting, where a change reaches nobody else.
+# Returns 1, with the reason on stderr, when the event cannot be read, so a
+# caller never takes "could not tell" for "no attendees".
+organised_meeting_attendees() {
+    local ev
+    ev=$(api_call GET "/me/events/$1?\$select=isOrganizer,attendees")
+    if ! printf '%s' "$ev" | jq -e 'type == "object" and (has("error") | not) and has("isOrganizer")' >/dev/null 2>&1; then
+        echo "Error: could not read the event to check who it would notify:" >&2
+        printf '%s' "$ev" | jq -r '.error.message // .error.code // "no response"' >&2 2>/dev/null || echo "no response" >&2
+        return 1
+    fi
+    printf '%s' "$ev" | jq -r 'if .isOrganizer then [.attendees[]?.emailAddress.address // empty] | join(", ") else "" end'
+}
+
 # Convert a comma/semicolon-separated address list into Graph attendee objects.
 # $2 = attendee type: required (default) or optional.
 attendees_to_json() {
@@ -422,21 +445,39 @@ case "$1" in
         ;;
 
     create)
-        subject="$2"
-        start_time="$3"
-        end_time="$4"
-        location="${5:-}"
-        attendees="${6:-}"
+        # --send-invites may sit anywhere after the verb; the rest are positional.
+        send_invites=0
+        pos=()
+        for arg in "${@:2}"; do
+            if [ "$arg" = "--send-invites" ]; then send_invites=1; else pos+=("$arg"); fi
+        done
+        subject="${pos[0]:-}"
+        start_time="${pos[1]:-}"
+        end_time="${pos[2]:-}"
+        location="${pos[3]:-}"
+        attendees="${pos[4]:-}"
 
         if [ -z "$subject" ] || [ -z "$start_time" ] || [ -z "$end_time" ]; then
-            echo "Usage: outlook-calendar.sh create <subject> <start-time> <end-time> [location] [attendees]"
+            echo "Usage: outlook-calendar.sh create <subject> <start-time> <end-time> [location] [attendees --send-invites]"
             echo "Times in format: YYYY-MM-DDTHH:MM"
-            echo "Attendees: comma/semicolon-separated emails; pass \"\" for location"
-            echo "if you want attendees with no location. Invitations are sent."
+            echo "Without attendees nothing is sent. Attendees are comma/semicolon-separated"
+            echo "emails (pass \"\" for location if there is none), and they need --send-invites,"
+            echo "because the invitations go out as soon as the event exists."
             exit 1
         fi
 
         attendees_json=$(attendees_to_json "$attendees")
+
+        # A one-shot invite has to be asked for by name. Without the flag the
+        # attendee list is refused before anything reaches Graph, so an agent
+        # that passes attendees by habit gets an error rather than a sent invite.
+        if [ "$(printf '%s' "$attendees_json" | jq 'length')" -gt 0 ] && [ "$send_invites" -ne 1 ]; then
+            echo "Refused: create with attendees sends the invitations as soon as the event exists." >&2
+            echo "  Create it without attendees, confirm the details, then run: invite <event-id> <emails>" >&2
+            echo "  Or, if the exact attendee list is already approved, add --send-invites." >&2
+            echo "Nothing was created and nothing was sent." >&2
+            exit 1
+        fi
 
         echo "Creating event..."
         payload=$(jq -n \
@@ -576,17 +617,37 @@ case "$1" in
         ;;
 
     update)
-        event_id="$2"
-        field="$3"
-        value="$4"
+        # --notify-attendees may sit anywhere after the verb.
+        notify=0
+        pos=()
+        for arg in "${@:2}"; do
+            if [ "$arg" = "--notify-attendees" ]; then notify=1; else pos+=("$arg"); fi
+        done
+        event_id="${pos[0]:-}"
+        field="${pos[1]:-}"
+        value="${pos[2]:-}"
 
         if [ -z "$event_id" ] || [ -z "$field" ] || [ -z "$value" ]; then
-            echo "Usage: outlook-calendar.sh update <event-id> <field> <value>"
+            echo "Usage: outlook-calendar.sh update <event-id> <field> <value> [--notify-attendees]"
             echo "Fields: subject, location, start, end"
+            echo "Changing a meeting you organise sends every attendee an update, so it"
+            echo "needs --notify-attendees. Your own events and other people's meetings do not."
             exit 1
         fi
 
         if ! event_id=$(resolve_event_id "$event_id"); then
+            exit 1
+        fi
+
+        # Graph sends a meeting update to the attendees when the organiser
+        # changes a meeting, so this is a send, and it has to be asked for.
+        if ! attendees=$(organised_meeting_attendees "$event_id"); then
+            exit 1
+        fi
+        if [ -n "$attendees" ] && [ "$notify" -ne 1 ]; then
+            echo "Refused: this is a meeting you organise, and changing it sends an update to: $attendees" >&2
+            echo "  Confirm the change with the user, then run it again with --notify-attendees." >&2
+            echo "Nothing was changed and nothing was sent." >&2
             exit 1
         fi
 
@@ -628,6 +689,19 @@ case "$1" in
         fi
 
         if ! event_id=$(resolve_event_id "$event_id"); then
+            exit 1
+        fi
+
+        # Deleting a meeting on the organiser's calendar sends the attendees a
+        # cancellation (Graph's documented behaviour), so it is not the silent
+        # delete it looks like. `cancel` does the same thing and says so.
+        if ! attendees=$(organised_meeting_attendees "$event_id"); then
+            exit 1
+        fi
+        if [ -n "$attendees" ]; then
+            echo "Refused: this is a meeting you organise, and deleting it sends a cancellation to: $attendees" >&2
+            echo "  To cancel it and tell them, confirm with the user, then run: cancel <event-id> [comment]" >&2
+            echo "Nothing was deleted and nothing was sent." >&2
             exit 1
         fi
 
@@ -784,25 +858,29 @@ case "$1" in
         echo "  calendars                  List calendars"
         echo
         echo "Creating:"
-        echo "  create <subject> <start> <end> [location] [attendees]"
+        echo "  create <subject> <start> <end> [location] [attendees --send-invites]"
         echo "                             Create event. Without attendees nothing is sent"
         echo "                             (two-step: create, confirm, then 'invite')."
-        echo "                             Passing attendees sends invitations immediately."
+        echo "                             Attendees need --send-invites: they are invited at once."
         echo "  invite <id> <emails> [required|optional]"
         echo "                             Add attendees to an event and send invitations"
         echo "  quick <subject> <start>    Create 1-hour event"
         echo
         echo "Managing:"
-        echo "  update <id> <field> <value>"
-        echo "                             Update event field (subject/location/start/end)"
+        echo "  update <id> <field> <value> [--notify-attendees]"
+        echo "                             Update event field (subject/location/start/end)."
+        echo "                             A meeting you organise needs --notify-attendees."
         echo "  respond <id> <accept|decline|tentative> [comment]"
         echo "                             Respond to a meeting invitation"
         echo "  cancel <id> [comment]      Cancel a meeting you organise (notifies attendees)"
-        echo "  delete <id>                Delete event (no notification)"
+        echo "  delete <id>                Delete an event that notifies nobody. A meeting you"
+        echo "                             organise is refused: use cancel, which tells attendees"
         echo
         echo "Availability:"
         echo "  free <start> <end>         Check free/busy"
         echo
         echo "Times in format: YYYY-MM-DDTHH:MM"
+        echo
+        echo "OUTLOOK_READ_ONLY=1 refuses every command above that is not a viewing command."
         ;;
 esac

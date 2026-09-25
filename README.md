@@ -45,9 +45,16 @@ not.
 end-to-end before summarising or replying, so deadlines, attachments and requests buried below
 the fold are not missed.
 
-**Nothing leaves without a second command.** Drafting and sending are different verbs, and so
-are creating an event and inviting anyone to it. An agent driving a mailbox is one confident
-inference away from mailing a client; the gap is where a person gets to look.
+**Sending is a separate command, and Claude Code can make you approve it.** Drafting and
+sending are different verbs, and so are creating an event and inviting anyone to it. The scripts
+refuse the one-command shortcuts: `create` with attendees needs `--send-invites`, changing a
+meeting you organise needs `--notify-attendees` because everyone on it is told, and deleting one
+is refused in favour of `cancel`, which says what it does. What the scripts cannot do is stop
+an agent running `send` straight after `draft`. Under Claude Code the plugin asks you before any
+command that sends, and `install.sh` offers ask rules that do the same in every permission mode,
+bypass included. `OUTLOOK_READ_ONLY=1` refuses every command that writes or sends, for a
+session that only triages. [The send gap](docs/architecture.md#the-send-gap) says what each
+layer covers and what it does not.
 
 **Time-aware.** It anchors "today", "tomorrow" and "by EOD" against the real clock and tracks
 BST against UTC, so scheduled sends and deadline arithmetic are correct. Calendar times are
@@ -115,6 +122,12 @@ same install two ways: Claude Code substitutes `${CLAUDE_SKILL_DIR}`, so the
 whole skill directory is symlinked untouched, while Codex does not, so its
 `SKILL.md` is rewritten at install time. Re-run the Codex one after editing
 `SKILL.md`.
+
+`install.sh` also offers the ask rules in [`hooks/ask-rules.json`](hooks/ask-rules.json),
+which make Claude Code ask you before any command that sends. They go in your own
+`~/.claude/settings.json`, so they are only added with your yes: at the prompt, or by
+passing `--ask-rules`. `--no-ask-rules` skips the offer. A plugin install runs the
+matching hook instead and needs neither.
 
 ## Requirements
 
