@@ -286,7 +286,7 @@ thousand messages takes five to fifteen minutes.
 
 | Path | Contents |
 |---|---|
-| `~/.dbhq/outlook/<account>/config.json` | Client ID, secret, tenant, redirect URI, scopes (`600`) |
+| `~/.dbhq/outlook/<account>/config.json` | Client ID, tenant, redirect URI, scopes (`600`). A `client_secret` only on an install from before PKCE, sent on refresh while it is there |
 | `~/.dbhq/outlook/<account>/credentials.json` | Access and refresh tokens (`600`) |
 | `~/.dbhq/outlook/<account>/id_cache.json` | Short ID to full Graph ID |
 | `~/.dbhq/outlook/<account>/event_id_cache.json` | Full IDs of the events the last calendar listing printed |
@@ -299,7 +299,7 @@ A pre-multi-account install with flat `~/.dbhq/outlook/*.json` files is migrated
 
 | Skill | Required | Optional |
 |---|---|---|
-| `outlook` | `azure-cli`, `jq`, `curl` | `pandoc`, for every markdown command |
+| `outlook` | `azure-cli`, `jq`, `curl`, `openssl` (setup) | `pandoc`, for every markdown command |
 | `outlook-to-md` | `python3` 3.9+ | `readpst` (`pst-utils`), needed for `.pst` files only |
 
 `install.sh` checks these per skill, so a missing `azure-cli` skips `outlook` and leaves

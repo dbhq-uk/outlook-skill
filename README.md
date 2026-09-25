@@ -137,7 +137,7 @@ you can take either half on its own.
 
 | Skill | Required | Optional |
 |---|---|---|
-| `outlook` | `azure-cli` · `jq` · `curl` | `pandoc` (markdown-formatted emails) |
+| `outlook` | `azure-cli` · `jq` · `curl` · `openssl` (setup) | `pandoc` (markdown-formatted emails) |
 | `outlook-to-md` | `python3` (3.9+) | `readpst` (`pst-utils`; needed for `.pst` files only) |
 
 `outlook-to-md` provisions its own virtualenv on install, on any Python from 3.9 up. It reads

@@ -79,7 +79,8 @@ OUTLOOK_ACCOUNT=work ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh inbox
 # List configured accounts
 ${CLAUDE_SKILL_DIR}/scripts/outlook-token.sh list
 
-# Add a new account (reuses existing Azure app registration if one exists)
+# Add a new account (reuses existing Azure app registration if one exists).
+# Interactive: the user runs this, not the agent. See Setup below.
 ${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh --account work
 ```
 
@@ -89,10 +90,12 @@ Calendar timezone is auto-detected from the system. Override with `OUTLOOK_TZ`, 
 
 ## Prerequisites
 
-- Credentials configured in `~/.dbhq/outlook/<account>/` (run setup if not done)
-- Azure CLI, jq, curl installed
+- Credentials configured in `~/.dbhq/outlook/<account>/`. If not, ask the user to run
+  setup (see [Setup](#setup)); do not run it yourself.
+- Azure CLI, jq, curl and openssl installed
 
-**Note:** Tokens are automatically refreshed when needed. No manual intervention required.
+**Note:** Tokens refresh themselves when a command needs it. If a refresh is refused (the
+sign-in has lapsed), the user has to run setup again.
 
 ## Refusals and permission prompts
 
@@ -640,7 +643,7 @@ explicit approval:
 ## Error Handling
 
 - **Token expired**: Automatically refreshed on next call
-- **Permission denied**: Re-run setup to re-consent
+- **Permission denied**: ask the user to re-run setup to re-consent
 - **Network error**: Check connectivity, retry
 - **Throttled (HTTP 429)**: the scripts wait for Graph's `Retry-After` and retry up
   to three times on their own. Do not loop the command yourself.
@@ -649,9 +652,16 @@ explicit approval:
 
 ## Setup
 
-If not configured, run:
+**Ask the user to run setup. Do not run it yourself.** It opens a browser, needs a
+person to sign in, and waits for them to paste the URL the sign-in lands on. Give
+them the command:
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh
+${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh                 # the default account
+${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh --account work  # another mailbox
 ```
+
+The app is a public client that signs in with PKCE, so there is no client secret to
+expire. An install from before that still has a secret in `config.json`; it keeps
+working, and running setup again moves it over.
 
 See `references/setup.md` for manual setup instructions.

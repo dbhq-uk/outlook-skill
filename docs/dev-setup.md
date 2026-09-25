@@ -5,7 +5,7 @@ Set the skill up from source with a **live symlink install**, so your edits are 
 ## Prerequisites
 
 - `git` (and the GitHub CLI `gh` if you'll push changes)
-- `jq`, `curl`, `azure-cli` (the `az` command), and optionally `pandoc` (for markdown-formatted emails)
+- `jq`, `curl`, `openssl`, `azure-cli` (the `az` command), and optionally `pandoc` (for markdown-formatted emails)
 
 ## 1. Clone
 

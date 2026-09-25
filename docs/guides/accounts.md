@@ -65,12 +65,29 @@ connection is back. Nothing needs re-authenticating.
 Past that, re-authenticate: `outlook-setup.sh`, or steps 6 and 7 of
 [`references/setup.md`](../../skills/outlook/references/setup.md) by hand.
 
-**"Invalid client secret".** Client secrets are visible once, at creation. If yours is lost or
-expired, make a new one in the Azure portal under *Certificates & secrets* and update
-`client_secret` in `~/.dbhq/outlook/<account>/config.json`.
+**"Invalid client secret", or a secret that has expired.** Setup no longer uses a secret: the
+app is a public client and signs in with PKCE. An install from before that has a
+`client_secret` in `config.json`, which it keeps sending, so it works until the secret expires.
+To move it over, run setup again for that account:
+
+```bash
+~/.claude/skills/outlook/scripts/outlook-setup.sh --account <name>
+```
+
+When it offers to convert the app to a public client, say yes. That needs the Azure CLI and
+rights on the app registration. It moves the redirect URI to the public client platform and
+allows public client flows; old secrets are left in place, so other accounts on the same app
+keep working. Setup then names any other account still on the old secret. Run setup for each
+of those too. Once none is left, you can delete the secret in the Azure portal.
 
 **"AADSTS50011: Reply URL does not match".** The redirect URI in the app registration must be
-exactly `https://login.microsoftonline.com/common/oauth2/nativeclient`.
+exactly `https://login.microsoftonline.com/common/oauth2/nativeclient`, on the **Mobile and
+desktop applications** platform.
+
+**"AADSTS7000218" (the request must contain a client secret).** The app is still a Web
+(confidential) client. Run setup again and let it convert the app, or in the portal move the
+redirect URI to **Mobile and desktop applications** and set **Allow public client flows** to
+Yes.
 
 **"Insufficient privileges".** The five delegated permissions - `Mail.ReadWrite`, `Mail.Send`,
 `Calendars.ReadWrite`, `User.Read`, `offline_access` - are not all present or not all
@@ -90,7 +107,7 @@ message is now.
 
 | Path | Contents |
 |---|---|
-| `~/.dbhq/outlook/<account>/config.json` | Azure app client ID and secret, tenant, scopes |
+| `~/.dbhq/outlook/<account>/config.json` | Azure app client ID, tenant, scopes. A `client_secret` only on an install from before PKCE |
 | `~/.dbhq/outlook/<account>/credentials.json` | OAuth access and refresh tokens |
 | `~/.dbhq/outlook/<account>/id_cache.json` | Short ID to full Graph ID mapping |
 | `~/.dbhq/outlook/<account>/event_id_cache.json` | Full event IDs from the last calendar listing |

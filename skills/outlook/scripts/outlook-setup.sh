@@ -1,6 +1,14 @@
 #!/bin/bash
 # Outlook OAuth Setup Script
-# Automates Azure app registration and OAuth flow for M365 Outlook access
+# Registers (or reuses) an Azure app and signs a mailbox in, for M365 Outlook
+# access. Needs a browser and a person: an agent should ask the user to run it.
+#
+# The app is a PUBLIC client and sign-in uses the authorisation-code flow with
+# PKCE, so there is no client secret. Setup used to register a confidential web
+# app with a two-year secret, shared by every account set up after it; when that
+# secret expired, every account stopped at once, with no warning. An install
+# from then still works (its secret is still sent on refresh), and running this
+# setup again moves it over. See docs/guides/accounts.md.
 
 set -e
 
@@ -57,6 +65,19 @@ CONFIG_DIR="$BASE_DIR/$ACCOUNT"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 CREDS_FILE="$CONFIG_DIR/credentials.json"
 
+# The sign-in constants and the PKCE helpers live in lib/graph.sh, beside this
+# script's real location (symlinks followed), shared with the other scripts.
+_self="${BASH_SOURCE[0]}"
+while [ -L "$_self" ]; do
+    _dir=$(cd -P "$(dirname "$_self")" && pwd)
+    _self=$(readlink "$_self")
+    case "$_self" in /*) ;; *) _self="$_dir/$_self" ;; esac
+done
+OUTLOOK_SCRIPT_DIR=$(cd -P "$(dirname "$_self")" && pwd)
+unset _self _dir
+# shellcheck source=lib/graph.sh
+. "$OUTLOOK_SCRIPT_DIR/lib/graph.sh"
+
 # App name is suffixed per non-default account when a fresh app is created.
 if [ "$ACCOUNT" = "default" ]; then
     APP_NAME="Claude-Outlook-Integration"
@@ -68,8 +89,28 @@ echo -e "${BLUE}=== Outlook OAuth Setup ===${NC}"
 echo -e "Account: ${GREEN}$ACCOUNT${NC}"
 echo
 
-# Detect a reusable app registration from an existing account (used later in
-# Step 2, but must be known before the dependency check so we don't block users
+# Make an existing app registration a public client: the native-client
+# redirect URI moves from the web platform to "Mobile and desktop
+# applications", and public client flows are allowed. Other redirect URIs are
+# left as they are. Existing client secrets are not touched, so any account
+# still using one keeps working until it is set up again.
+make_public_client() {
+    local app_id="$1" web public body
+    web=$(az ad app show --id "$app_id" --query "web.redirectUris" -o json 2>/dev/null) || web='[]'
+    public=$(az ad app show --id "$app_id" --query "publicClient.redirectUris" -o json 2>/dev/null) || public='[]'
+    body=$(jq -cn --arg uri "$OUTLOOK_REDIRECT_URI" --argjson web "${web:-[]}" --argjson public "${public:-[]}" '{
+        isFallbackPublicClient: true,
+        web: {redirectUris: (($web // []) - [$uri])},
+        publicClient: {redirectUris: ((($public // []) - [$uri]) + [$uri])}
+    }')
+    az rest --method PATCH \
+        --uri "https://graph.microsoft.com/v1.0/applications(appId='$app_id')" \
+        --headers "Content-Type=application/json" \
+        --body "$body" > /dev/null
+}
+
+# Detect a reusable app registration from an existing account (used later,
+# but must be known before the dependency check so we don't block users
 # who lack az but can reuse an existing app).
 REUSE_CONFIG=""
 for dir in "$BASE_DIR"/*/; do
@@ -89,16 +130,13 @@ if [ -z "$REUSE_CONFIG" ] && ! command -v az &> /dev/null; then
     exit 1
 fi
 
-if ! command -v jq &> /dev/null; then
-    echo -e "${RED}Error: jq not found${NC}"
-    echo "Install: brew install jq (macOS) or apt install jq (Linux)"
-    exit 1
-fi
-
-if ! command -v curl &> /dev/null; then
-    echo -e "${RED}Error: curl not found${NC}"
-    exit 1
-fi
+for tool in jq curl openssl; do
+    if ! command -v "$tool" &> /dev/null; then
+        echo -e "${RED}Error: $tool not found${NC}"
+        echo "Install: brew install $tool (macOS) or apt install $tool (Linux)"
+        exit 1
+    fi
+done
 
 echo -e "${GREEN}All dependencies found${NC}"
 echo
@@ -113,86 +151,108 @@ if [ -f "$CONFIG_FILE" ]; then
     fi
 fi
 
-# Step 1: Azure login
-if [ -z "$SKIP_APP_CREATE" ]; then
-    echo -e "${BLUE}Step 1/7: Azure Login${NC}"
-    echo "Logging into Azure..."
-
-    if ! az account show &> /dev/null; then
-        az login --use-device-code
-    fi
-
-    echo -e "${GREEN}Logged in to Azure${NC}"
-    echo
-fi
-
-# Step 2: Create or get app registration
-echo -e "${BLUE}Step 2/7: App Registration${NC}"
+# Decide which app registration to use. Nothing in Azure changes yet.
+CLIENT_ID=""
+CLIENT_SECRET=""       # set only when the user keeps an old app's secret
+CONVERT_APP=""         # set when an existing app must become a public client
 
 # Offer to reuse an existing account's app registration when one was detected.
 # The app is multi-tenant + personal-account, so one app can authorize many
 # mailboxes, and additional mailboxes then need no Azure admin rights.
 if [ -n "$REUSE_CONFIG" ]; then
     REUSE_NAME=$(basename "$(dirname "$REUSE_CONFIG")")
+    echo -e "${BLUE}App registration${NC}"
     echo -e "${YELLOW}Found existing app registration from account '$REUSE_NAME'.${NC}"
     read -rp "Reuse it for '$ACCOUNT'? (recommended) (Y/n): " reuse_ans
     if [[ ! "$reuse_ans" =~ ^[Nn]$ ]]; then
-        CLIENT_ID=$(jq -r '.client_id' "$REUSE_CONFIG")
-        CLIENT_SECRET=$(jq -r '.client_secret' "$REUSE_CONFIG")
+        CLIENT_ID=$(jq -r '.client_id // empty' "$REUSE_CONFIG")
+        reuse_secret=$(jq -r '.client_secret // empty' "$REUSE_CONFIG")
+        if [ -n "$reuse_secret" ]; then
+            echo
+            echo -e "${YELLOW}That app was registered with a client secret. Secrets expire, and every${NC}"
+            echo -e "${YELLOW}account sharing this one stops at once when it does. As a public client it${NC}"
+            echo -e "${YELLOW}needs no secret. Converting it needs the Azure CLI and rights on the app.${NC}"
+            read -rp "Convert it to a public client now? (Y/n): " convert_ans
+            if [[ "$convert_ans" =~ ^[Nn]$ ]]; then
+                CLIENT_SECRET="$reuse_secret"
+                echo -e "${YELLOW}Keeping the secret. This account stops working when it expires.${NC}"
+            elif ! command -v az &> /dev/null; then
+                echo -e "${RED}Error: converting needs the Azure CLI (az), which is not installed.${NC}"
+                echo "Install it, or answer n to keep the secret for now."
+                exit 1
+            else
+                CONVERT_APP=1
+            fi
+        fi
         echo -e "${GREEN}Reusing app: $CLIENT_ID${NC}"
-        SKIP_APP_CREATE=1
+        echo
     fi
 fi
 
-if [ -z "$SKIP_APP_CREATE" ]; then
-    # Check if app already exists
+if [ -z "$CLIENT_ID" ] || [ -n "$CONVERT_APP" ]; then
+    echo -e "${BLUE}Azure login${NC}"
+    if ! az account show &> /dev/null; then
+        az login --use-device-code
+    fi
+    echo -e "${GREEN}Logged in to Azure${NC}"
+    echo
+fi
+
+if [ -z "$CLIENT_ID" ]; then
+    echo -e "${BLUE}App registration${NC}"
     EXISTING_APP=$(az ad app list --display-name "$APP_NAME" --query "[0].appId" -o tsv 2>/dev/null || echo "")
 
     if [ -n "$EXISTING_APP" ] && [ "$EXISTING_APP" != "None" ]; then
         echo -e "${YELLOW}Found existing app: $EXISTING_APP${NC}"
         read -rp "Use existing app? (Y/n): " use_existing
-        if [[ "$use_existing" =~ ^[Nn]$ ]]; then
-            echo "Creating new app..."
-            CLIENT_ID=$(az ad app create \
-                --display-name "$APP_NAME-$(date +%s)" \
-                --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
-                --web-redirect-uris "https://login.microsoftonline.com/common/oauth2/nativeclient" \
-                --query appId -o tsv)
-        else
+        if [[ ! "$use_existing" =~ ^[Nn]$ ]]; then
             CLIENT_ID="$EXISTING_APP"
+            CONVERT_APP=1
         fi
+        NEW_APP_NAME="$APP_NAME-$(date +%s)"
     else
-        echo "Creating app registration..."
-        CLIENT_ID=$(az ad app create \
-            --display-name "$APP_NAME" \
-            --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
-            --web-redirect-uris "https://login.microsoftonline.com/common/oauth2/nativeclient" \
-            --query appId -o tsv)
+        NEW_APP_NAME="$APP_NAME"
     fi
 
+    if [ -z "$CLIENT_ID" ]; then
+        echo "Creating app registration (public client, no secret)..."
+        CLIENT_ID=$(az ad app create \
+            --display-name "$NEW_APP_NAME" \
+            --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
+            --public-client-redirect-uris "$OUTLOOK_REDIRECT_URI" \
+            --is-fallback-public-client true \
+            --query appId -o tsv)
+    fi
     echo -e "${GREEN}App ID: $CLIENT_ID${NC}"
     echo
+    ADD_PERMISSIONS=1
 fi
 
-# Step 3: Create client secret
-if [ -z "$SKIP_APP_CREATE" ]; then
-    echo -e "${BLUE}Step 3/7: Creating Client Secret${NC}"
+if [ -z "$CLIENT_ID" ]; then
+    echo -e "${RED}Error: no app registration to use.${NC}"
+    exit 1
+fi
 
-    SECRET_RESULT=$(az ad app credential reset \
-        --id "$CLIENT_ID" \
-        --append \
-        --display-name "Claude Code Secret" \
-        --years 2 \
-        --query password -o tsv)
-
-    CLIENT_SECRET="$SECRET_RESULT"
-    echo -e "${GREEN}Client secret created (valid for 2 years)${NC}"
+# An app made before PKCE becomes a public client.
+if [ -n "$CONVERT_APP" ]; then
+    echo -e "${BLUE}Making the app a public client${NC}"
+    if ! make_public_client "$CLIENT_ID"; then
+        echo -e "${RED}Error: could not update app $CLIENT_ID.${NC}"
+        echo "You may lack rights on it. In the Azure portal, under Authentication:"
+        echo "  - add the platform 'Mobile and desktop applications' with the redirect URI"
+        echo "    $OUTLOOK_REDIRECT_URI"
+        echo "  - remove that URI from the Web platform"
+        echo "  - set 'Allow public client flows' to Yes"
+        echo "Then run this setup again."
+        exit 1
+    fi
+    echo -e "${GREEN}App $CLIENT_ID is a public client. Its old secrets are untouched.${NC}"
     echo
 fi
 
-# Step 4: Add API permissions
-if [ -z "$SKIP_APP_CREATE" ]; then
-    echo -e "${BLUE}Step 4/7: Configuring API Permissions${NC}"
+# Add API permissions to a new or found app
+if [ -n "${ADD_PERMISSIONS:-}" ]; then
+    echo -e "${BLUE}Configuring API permissions${NC}"
 
     # Microsoft Graph API ID
     GRAPH_API="00000003-0000-0000-c000-000000000000"
@@ -223,30 +283,15 @@ if [ -z "$SKIP_APP_CREATE" ]; then
     echo
 fi
 
-# Step 5: Save config
-mkdir -p "$CONFIG_DIR"
-chmod 700 "$HOME/.dbhq" "$BASE_DIR" "$CONFIG_DIR"
-echo -e "${BLUE}Step 5/7: Saving Configuration${NC}"
+# Sign in, with PKCE
+echo -e "${BLUE}Sign in${NC}"
 
-cat > "$CONFIG_FILE" << EOF
-{
-    "client_id": "$CLIENT_ID",
-    "client_secret": "$CLIENT_SECRET",
-    "tenant": "common",
-    "redirect_uri": "https://login.microsoftonline.com/common/oauth2/nativeclient",
-    "scope": "offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read"
-}
-EOF
-
-chmod 600 "$CONFIG_FILE"
-echo -e "${GREEN}Configuration saved to $CONFIG_FILE${NC}"
-echo
-
-# Step 6: OAuth authorization
-echo -e "${BLUE}Step 6/7: OAuth Authorization${NC}"
-
-SCOPE="offline_access%20Mail.ReadWrite%20Mail.Send%20Calendars.ReadWrite%20User.Read"
-AUTH_URL="https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=$CLIENT_ID&response_type=code&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient&scope=$SCOPE&prompt=select_account"
+if ! CODE_VERIFIER=$(outlook_pkce_verifier) || ! STATE=$(outlook_random 32); then
+    echo -e "${RED}Error: could not read /dev/urandom for the sign-in.${NC}"
+    exit 1
+fi
+CODE_CHALLENGE=$(outlook_pkce_challenge "$CODE_VERIFIER")
+AUTH_URL=$(outlook_authorize_url "$CLIENT_ID" "$CODE_CHALLENGE" "$STATE")
 
 echo -e "${YELLOW}Opening browser for Microsoft login...${NC}"
 echo
@@ -266,49 +311,81 @@ echo -e "${YELLOW}Copy the ENTIRE URL from your browser's address bar and paste 
 echo
 read -rp "Paste redirect URL: " REDIRECT_URL
 
-# Extract authorization code
-AUTH_CODE=$(echo "$REDIRECT_URL" | sed -n 's/.*code=\([^&]*\).*/\1/p')
+AUTH_CODE=$(outlook_url_param "$REDIRECT_URL" code)
+RETURNED_STATE=$(outlook_url_param "$REDIRECT_URL" state)
 
 if [ -z "$AUTH_CODE" ]; then
+    SIGNIN_ERROR=$(outlook_url_param "$REDIRECT_URL" error_description | sed 's/+/ /g; s/%20/ /g')
     echo -e "${RED}Error: Could not extract authorization code from URL${NC}"
+    [ -n "$SIGNIN_ERROR" ] && echo "Microsoft said: $SIGNIN_ERROR"
+    exit 1
+fi
+
+# The state ties the pasted URL to this sign-in. A URL from an earlier or
+# different sign-in would not redeem against this verifier anyway, so refuse it
+# with a clear reason rather than an opaque token error.
+if [ "$RETURNED_STATE" != "$STATE" ]; then
+    echo -e "${RED}Error: that URL is from a different sign-in (state does not match).${NC}"
+    echo "Run setup again and paste the URL from the sign-in it opens."
     exit 1
 fi
 
 echo -e "${GREEN}Authorization code received${NC}"
 echo
 
-# Exchange code for tokens
+# Exchange code for tokens. No client secret: the code verifier proves this is
+# the machine that started the sign-in. Only an app kept on its old secret
+# (declined above) still sends one.
 echo "Exchanging code for tokens..."
+
+secret_arg=()
+[ -n "$CLIENT_SECRET" ] && secret_arg=(--data-urlencode "client_secret=$CLIENT_SECRET")
 
 NOW=$(date +%s)
 TOKEN_RESPONSE=$(curl -s --connect-timeout 10 --max-time 60 \
-    -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
+    -X POST "$OUTLOOK_TOKEN_URL" \
     -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "client_id=$CLIENT_ID" \
-    -d "client_secret=$CLIENT_SECRET" \
+    --data-urlencode "client_id=$CLIENT_ID" \
+    ${secret_arg[@]+"${secret_arg[@]}"} \
     -d "code=$AUTH_CODE" \
-    -d "redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient" \
-    -d "grant_type=authorization_code" \
-    -d "scope=offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read")
+    --data-urlencode "code_verifier=$CODE_VERIFIER" \
+    --data-urlencode "redirect_uri=$OUTLOOK_REDIRECT_URI" \
+    --data-urlencode "grant_type=authorization_code" \
+    --data-urlencode "scope=$OUTLOOK_SCOPE")
 
 # Check for error
-if echo "$TOKEN_RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+if ! printf '%s' "$TOKEN_RESPONSE" | jq -e '.access_token | type == "string" and length > 0' > /dev/null 2>&1; then
     echo -e "${RED}Error getting tokens:${NC}"
-    echo "$TOKEN_RESPONSE" | jq -r '.error_description'
+    printf '%s' "$TOKEN_RESPONSE" | jq -r '.error_description // .error // .' 2>/dev/null || printf '%s\n' "$TOKEN_RESPONSE"
     exit 1
 fi
 
-# Save credentials, stamping an absolute expiry so the mail/calendar scripts can
-# skip their per-command token pre-flight.
-EXPIRES_IN=$(echo "$TOKEN_RESPONSE" | jq -r '.expires_in // 3600')
-echo "$TOKEN_RESPONSE" | jq --argjson at "$((NOW + EXPIRES_IN))" '. + {expires_at: $at}' > "$CREDS_FILE"
+# Save config and credentials together, only now that sign-in has worked, so a
+# failed sign-in leaves an existing account as it was. The config carries no
+# client_secret unless the user chose to keep an old app's secret.
+mkdir -p "$CONFIG_DIR"
+chmod 700 "$HOME/.dbhq" "$BASE_DIR" "$CONFIG_DIR"
+
+jq -n --arg id "$CLIENT_ID" --arg secret "$CLIENT_SECRET" \
+      --arg redirect "$OUTLOOK_REDIRECT_URI" --arg scope "$OUTLOOK_SCOPE" '
+    {client_id: $id}
+    + (if $secret != "" then {client_secret: $secret} else {} end)
+    + {tenant: "common", redirect_uri: $redirect, scope: $scope}
+' > "$CONFIG_FILE"
+chmod 600 "$CONFIG_FILE"
+echo -e "${GREEN}Configuration saved to $CONFIG_FILE${NC}"
+
+# Stamp an absolute expiry so the mail/calendar scripts can skip their
+# per-command token pre-flight.
+EXPIRES_IN=$(printf '%s' "$TOKEN_RESPONSE" | jq -r '(.expires_in | tonumber?) // 3600')
+printf '%s' "$TOKEN_RESPONSE" | jq --argjson at "$((NOW + EXPIRES_IN))" '. + {expires_at: $at}' > "$CREDS_FILE"
 chmod 600 "$CREDS_FILE"
 
 echo -e "${GREEN}Tokens saved to $CREDS_FILE${NC}"
 echo
 
-# Step 7: Test connection
-echo -e "${BLUE}Step 7/7: Testing Connection${NC}"
+# Test the connection
+echo -e "${BLUE}Testing the connection${NC}"
 
 ACCESS_TOKEN=$(jq -r '.access_token' "$CREDS_FILE")
 
@@ -328,6 +405,18 @@ UNREAD=$(echo "$TEST_RESPONSE" | jq -r '.unreadItemCount')
 echo -e "${GREEN}Connection successful!${NC}"
 echo -e "Inbox: ${TOTAL} total, ${UNREAD} unread"
 echo
+
+# Other accounts still on an old secret for this same app: say so once.
+for dir in "$BASE_DIR"/*/; do
+    other="$dir/config.json"
+    [ "$dir" = "$CONFIG_DIR/" ] && continue
+    [ -f "$other" ] || continue
+    if [ "$(jq -r '.client_id // empty' "$other")" = "$CLIENT_ID" ] \
+       && [ -n "$(jq -r '.client_secret // empty' "$other")" ] && [ -z "$CLIENT_SECRET" ]; then
+        echo -e "${YELLOW}Account '$(basename "$dir")' still uses this app's old secret. Run setup for it too:${NC}"
+        echo "  outlook-setup.sh --account $(basename "$dir")"
+    fi
+done
 
 echo -e "${GREEN}=== Setup Complete ===${NC}"
 echo

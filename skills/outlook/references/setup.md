@@ -15,8 +15,13 @@ If you prefer to set up the Azure app registration manually (instead of using `o
 4. Configure:
    - **Name:** `Claude-Outlook-Integration` (or your preferred name)
    - **Supported account types:** "Accounts in any organizational directory and personal Microsoft accounts"
-   - **Redirect URI:** Web → `https://login.microsoftonline.com/common/oauth2/nativeclient`
+   - **Redirect URI:** Public client/native (mobile & desktop) → `https://login.microsoftonline.com/common/oauth2/nativeclient`
 5. Click **Register**
+6. Under **Authentication**, set **Allow public client flows** to **Yes**, and save
+
+This makes the app a public client. It signs in with PKCE and has no client secret, so there
+is nothing to expire. Do not add a Web platform redirect for the same URI: a Web redirect
+makes Microsoft ask for a secret.
 
 ## Step 2: Note Your Application ID
 
@@ -24,15 +29,9 @@ After registration, you'll see the **Application (client) ID** on the Overview p
 
 Copy this - you'll need it later.
 
-## Step 3: Create Client Secret
+## Step 3: No client secret
 
-1. Go to **Certificates & secrets**
-2. Click **New client secret**
-3. Configure:
-   - **Description:** `Claude Code Secret`
-   - **Expires:** 24 months (recommended)
-4. Click **Add**
-5. **IMPORTANT:** Copy the secret **Value** immediately - you can only see it once!
+A public client needs none. Skip **Certificates & secrets**.
 
 ## Step 4: Configure API Permissions
 
@@ -71,7 +70,6 @@ Create `~/.dbhq/outlook/config.json`:
 ```json
 {
     "client_id": "YOUR_APPLICATION_ID",
-    "client_secret": "YOUR_CLIENT_SECRET",
     "tenant": "common",
     "redirect_uri": "https://login.microsoftonline.com/common/oauth2/nativeclient",
     "scope": "offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read"
@@ -86,13 +84,15 @@ chmod 600 ~/.dbhq/outlook/config.json
 
 ## Step 6: Get Authorization Code
 
-Build the authorization URL (replace YOUR_CLIENT_ID):
+Sign-in uses PKCE: make a random verifier, and send only its SHA-256 to the browser.
 
-```
-https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=YOUR_CLIENT_ID&response_type=code&redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient&scope=offline_access%20Mail.ReadWrite%20Mail.Send%20Calendars.ReadWrite%20User.Read
+```bash
+VERIFIER=$(LC_ALL=C tr -dc 'A-Za-z0-9._~-' < /dev/urandom | head -c 64)
+CHALLENGE=$(printf '%s' "$VERIFIER" | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+echo "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=YOUR_CLIENT_ID&response_type=code&redirect_uri=https%3A%2F%2Flogin.microsoftonline.com%2Fcommon%2Foauth2%2Fnativeclient&scope=offline_access%20Mail.ReadWrite%20Mail.Send%20Calendars.ReadWrite%20User.Read&code_challenge=$CHALLENGE&code_challenge_method=S256"
 ```
 
-1. Open this URL in your browser
+1. Open that URL in your browser, in the same shell session so `$VERIFIER` is kept
 2. Sign in with your M365 account
 3. Accept the permissions
 4. You'll be redirected to a blank page
@@ -101,17 +101,18 @@ https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=YOUR_CL
 
 ## Step 7: Exchange Code for Tokens
 
-Run this command (replace placeholders):
+Run this in the same shell (replace placeholders). There is no client secret: the verifier
+proves this is the machine that started the sign-in.
 
 ```bash
 curl -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "client_id=YOUR_CLIENT_ID" \
-  -d "client_secret=YOUR_CLIENT_SECRET" \
   -d "code=YOUR_AUTHORIZATION_CODE" \
-  -d "redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient" \
+  --data-urlencode "code_verifier=$VERIFIER" \
+  --data-urlencode "redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient" \
   -d "grant_type=authorization_code" \
-  -d "scope=offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read" \
+  --data-urlencode "scope=offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read" \
   > ~/.dbhq/outlook/credentials.json
 
 chmod 600 ~/.dbhq/outlook/credentials.json
@@ -133,9 +134,14 @@ Inbox: X total, Y unread
 
 ## Troubleshooting
 
-### "Invalid client secret"
-- Client secrets can only be viewed once when created
-- Create a new secret if you lost the original
+### "AADSTS7000218: The request body must contain ... client_assertion or client_secret"
+- The app is still a confidential (Web) client. Move the redirect URI to the
+  **Mobile and desktop applications** platform and set **Allow public client flows** to Yes
+
+### "Invalid client secret" (an install from before PKCE)
+- An older `config.json` carries a `client_secret`, which expires. Run
+  `outlook-setup.sh --account <name>` again: it converts the app to a public client and drops
+  the secret
 
 ### "AADSTS50011: Reply URL does not match"
 - Ensure redirect URI in Azure exactly matches: `https://login.microsoftonline.com/common/oauth2/nativeclient`
@@ -156,6 +162,6 @@ Tokens are automatically refreshed. If you see this error, it means the refresh 
 
 | File | Purpose |
 |------|---------|
-| `~/.dbhq/outlook/config.json` | Azure app credentials |
+| `~/.dbhq/outlook/config.json` | Azure app client ID and sign-in settings |
 | `~/.dbhq/outlook/credentials.json` | OAuth tokens |
 | `${CLAUDE_SKILL_DIR}/` | Skill and scripts |
