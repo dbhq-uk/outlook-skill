@@ -55,6 +55,11 @@ curl -s -H "Authorization: Bearer $T" \
 **"Account 'x' not configured"** - there is no `credentials.json` under
 `~/.dbhq/outlook/x/`. Run setup with `--account x`, or check you have not typo'd the name.
 
+**"Could not refresh the access token" / "the token endpoint answered without an access token".**
+The refresh request did not get a usable answer: no network, a timeout, or a proxy or gateway
+error page. `credentials.json` is left exactly as it was, so run the command again once the
+connection is back. Nothing needs re-authenticating.
+
 **Token expired, and refresh also failed.** Refresh tokens last around 90 days of inactivity.
 Past that, re-authenticate: `outlook-setup.sh`, or steps 6 and 7 of
 [`references/setup.md`](../../skills/outlook/references/setup.md) by hand.
@@ -87,6 +92,7 @@ message is now.
 | `~/.dbhq/outlook/<account>/config.json` | Azure app client ID and secret, tenant, scopes |
 | `~/.dbhq/outlook/<account>/credentials.json` | OAuth access and refresh tokens |
 | `~/.dbhq/outlook/<account>/id_cache.json` | Short ID to full Graph ID mapping |
+| `~/.dbhq/outlook/<account>/.token.lock` | Empty lock file, held while a token refreshes |
 
 The account directory is `700` and both credential files `600`, in your home directory and
 nowhere else. Nothing is sent anywhere except
