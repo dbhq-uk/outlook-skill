@@ -1930,8 +1930,12 @@ ${existing_body}"
             exit 1
         fi
 
-        die_on_error "$(api_call DELETE "/me/messages/$msg_id")" "deleting message"
-        echo "Message deleted"
+        # A move to Deleted Items, as Outlook's Delete key does, so the user can
+        # get the message back from there. A Graph DELETE on a message skips
+        # Deleted Items and goes straight to Recoverable Items, which is
+        # Shift+Delete and not what anyone asking to "delete" an email expects.
+        die_on_error "$(api_call POST "/me/messages/$msg_id/move" '{"destinationId": "deleteditems"}')" "moving message to Deleted Items"
+        echo "Moved to Deleted Items"
         ;;
 
     archive)
@@ -2237,8 +2241,8 @@ ${existing_body}"
         force="$3"
         if [ -z "$target" ]; then
             echo "Usage: outlook-mail.sh rmdir <folder-name> [--force]"
-            echo "       Refuses to delete a non-empty folder unless --force is given"
-            echo "       (deleted folder contents are moved to Deleted Items)."
+            echo "       Moves the folder, with everything in it, to Deleted Items."
+            echo "       Refuses a folder that holds messages unless --force is given."
             exit 1
         fi
         case "$(echo "$target" | tr '[:upper:]' '[:lower:]')" in
@@ -2255,16 +2259,21 @@ ${existing_body}"
         count=$(api_call GET "/me/mailFolders/$fid?\$select=totalItemCount" | jq -r '.totalItemCount // 0')
         if [ "${count:-0}" -gt 0 ] && [ "$force" != "--force" ]; then
             echo "Refusing to delete '$target': it contains $count message(s)."
-            echo "Re-run with --force to delete anyway (contents move to Deleted Items)."
+            echo "Re-run with --force to move it, and everything in it, to Deleted Items."
             exit 1
         fi
-        result=$(api_call DELETE "/me/mailFolders/$fid")
+        # A move to Deleted Items, as deleting a folder in Outlook does, so the
+        # folder and its messages can be restored from there. Graph's docs do
+        # not say where a DELETE on a folder sends its contents, and a DELETE on
+        # a message skips Deleted Items, so this moves the folder instead. That
+        # keeps the message below true by construction.
+        result=$(api_call POST "/me/mailFolders/$fid/move" '{"destinationId": "deleteditems"}')
         if [ -n "$result" ] && echo "$result" | jq -e '.error' > /dev/null 2>&1; then
-            echo "Error deleting folder:"
+            echo "Error moving folder to Deleted Items:"
             echo "$result" | jq -r '.error.message'
             exit 1
         fi
-        echo "Deleted folder '$target'"
+        echo "Moved folder '$target' to Deleted Items"
         ;;
 
     attachments)
@@ -2698,13 +2707,13 @@ ${existing_body}"
         echo "  rmcategory <name>          Delete a master category"
         echo "  junk <id>                  Move message to Junk Email"
         echo "  notjunk <id>               Move message back to Inbox"
-        echo "  delete <id>                Delete message"
+        echo "  delete <id>                Move a message to Deleted Items"
         echo "  archive <id>               Archive message"
         echo "  move <id> <folder>         Move message to folder"
         echo "  batch-move <folder> <ids>  Move many messages (args or stdin) via \$batch"
         echo "  mkdir <name> [parent]      Create folder (subfolder if parent given)"
         echo "  rename <folder> <new>      Rename a folder"
-        echo "  rmdir <folder> [--force]   Delete a folder (--force if non-empty)"
+        echo "  rmdir <folder> [--force]   Move a folder to Deleted Items (--force if non-empty)"
         echo "  folders                    List top-level mail folders"
         echo "  subfolders [parent]        List subfolders (default: inbox)"
         echo "  stats                      Inbox statistics"

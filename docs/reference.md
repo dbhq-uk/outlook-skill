@@ -117,7 +117,7 @@ Graph's 150 MB ceiling.
 | `rmcategory <name>` | Removes from the master list only. Messages keep the label |
 | `junk <id>` / `notjunk <id>` | To Junk Email, or back to the Inbox |
 | `archive <id>` | To the Archive folder |
-| `delete <id>` | To Deleted Items |
+| `delete <id>` | Moves the message to Deleted Items, where it can be restored. It gets a new ID there |
 | `move <id> <folder>` | |
 | `batch-move <folder> <id…>` | IDs as arguments or on stdin. Batches of 20 via Graph `$batch` |
 
@@ -132,7 +132,7 @@ exists.
 | `subfolders [parent]` | Default `inbox` |
 | `mkdir <name> [parent]` | Top-level, or a subfolder of `parent` |
 | `rename <folder> <new-name>` | Refuses well-known system folders |
-| `rmdir <folder> [--force]` | Refuses system folders always, and non-empty folders without `--force`. With it, contents go to Deleted Items |
+| `rmdir <folder> [--force]` | Moves the folder, and everything in it, to Deleted Items. Refuses system folders always, and a folder holding messages without `--force` |
 | `stats` | Inbox totals and unread count |
 
 ## calendar.sh
