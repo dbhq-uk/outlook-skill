@@ -38,7 +38,10 @@ rather than left to the umask:
 ```
 
 The credentials file is rewritten at `600` on every token refresh, not only at
-setup, so the permissions cannot drift over the life of the install.
+setup, so the permissions cannot drift over the life of the install. The new
+file is written beside the old one and renamed into place, and only when
+Microsoft's response carries an access token. A refresh that fails, times out or
+gets a non-JSON answer leaves the file unchanged.
 
 Multiple accounts are isolated in separate directories and selected with
 `--account` or `OUTLOOK_ACCOUNT`.

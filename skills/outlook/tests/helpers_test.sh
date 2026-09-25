@@ -4,7 +4,7 @@
 # These extract the real functions from the script and exercise them with a
 # mocked api_call + date, so no Microsoft account or network is required.
 # They cover: URL-encoding, KQL detection, search paging/sort/cap, folder
-# resolution (BFS + Parent/Child paths), and the token-expiry decision.
+# resolution (BFS + Parent/Child paths), and the api_call retry wrapper.
 #
 #   bash skills/outlook/tests/helpers_test.sh
 #
@@ -193,16 +193,8 @@ eq "bare name skips bin even when only match" "1" \
 eq "explicit bin path still resolves" "GHOST" \
    "$(api_call() { case "$2" in "/me/mailFolders?\$top=200") echo '{"value":[{"displayName":"Deleted Items","id":"DI"},{"displayName":"Inbox","id":"IB"}]}';; "/me/mailFolders/DI/childFolders?\$top=200") echo '{"value":[{"displayName":"Old Project","id":"GHOST"}]}';; "/me/mailFolders/deleteditems?\$select=id") echo '{"id":"DI"}';; *) echo '{"value":[]}';; esac; }; resolve_folder_id 'Deleted Items/Old Project')"
 
-########################################
-# token-expiry decision (mirrors ensure_valid_token's local check)
-########################################
-NOW=1000000
-decide() { if [ -n "$1" ] && [ "$NOW" -lt "$(( $2 - 60 ))" ]; then echo cached; else echo refresh; fi; }
-eq "token fresh -> cached"        "cached"  "$(decide tok 1000100)"
-eq "token within margin -> refresh" "refresh" "$(decide tok 1000030)"
-eq "token expired -> refresh"     "refresh" "$(decide tok 999000)"
-eq "token missing -> refresh"     "refresh" "$(decide '' 1000100)"
-eq "token no expires_at -> refresh" "refresh" "$(decide tok 0)"
+# The token-expiry decision and the refresh itself live in scripts/lib/graph.sh
+# and are tested against the real functions in token_test.sh.
 
 ########################################
 # api_call: empty 204/202 success must stay empty (NOT become an error);
@@ -239,6 +231,22 @@ _graph_request() {
 }
 unset OUTLOOK_TOKEN_RETRIED
 eq "api_call auth-retry recovers" "ok" "$(api_call GET /x | jq -r '.value[0]')"
+
+# A failed refresh must not blank the token or retry with nothing: the original
+# auth error stands, and one request is made, not two.
+echo 0 > /tmp/outlook_test_calls
+_graph_request() {
+    local n; n=$(cat /tmp/outlook_test_calls); n=$((n+1)); echo "$n" > /tmp/outlook_test_calls
+    printf '%s' '{"error":{"code":"InvalidAuthenticationToken","message":"expired"}}'
+    return 0
+}
+refresh_access_token() { return 1; }
+unset OUTLOOK_TOKEN_RETRIED
+eq "api_call failed refresh keeps the auth error" "InvalidAuthenticationToken" \
+   "$(api_call GET /x | jq -r '.error.code')"
+eq "api_call failed refresh does not retry" "1" "$(cat /tmp/outlook_test_calls)"
+eq "api_call failed refresh keeps the old token" "tok" "$(api_call GET /x >/dev/null; echo "$ACCESS_TOKEN")"
+refresh_access_token() { echo "newtok"; }
 
 ########################################
 # api_call_file: the attachment path streams its body from a file rather than an

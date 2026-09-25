@@ -68,9 +68,18 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
-CLIENT_ID=$(jq -r '.client_id' "$CONFIG_FILE")
-CLIENT_SECRET=$(jq -r '.client_secret' "$CONFIG_FILE")
-SCOPE="offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read"
+# The token code is shared with the mail and calendar scripts in lib/graph.sh,
+# found beside this script's real location (symlinks followed).
+_self="${BASH_SOURCE[0]}"
+while [ -L "$_self" ]; do
+    _dir=$(cd -P "$(dirname "$_self")" && pwd)
+    _self=$(readlink "$_self")
+    case "$_self" in /*) ;; *) _self="$_dir/$_self" ;; esac
+done
+OUTLOOK_SCRIPT_DIR=$(cd -P "$(dirname "$_self")" && pwd)
+unset _self _dir
+# shellcheck source=lib/graph.sh
+. "$OUTLOOK_SCRIPT_DIR/lib/graph.sh"
 
 case "$1" in
     refresh)
@@ -79,37 +88,13 @@ case "$1" in
             exit 1
         fi
 
-        REFRESH_TOKEN=$(jq -r '.refresh_token' "$CREDS_FILE")
-
-        if [ -z "$REFRESH_TOKEN" ] || [ "$REFRESH_TOKEN" = "null" ]; then
-            echo "Error: No refresh token found. Run outlook-setup.sh to re-authenticate."
-            exit 1
-        fi
-
         echo "Refreshing token..."
-
-        NOW=$(date +%s)
-        RESPONSE=$(curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            -d "client_id=$CLIENT_ID" \
-            -d "client_secret=$CLIENT_SECRET" \
-            -d "refresh_token=$REFRESH_TOKEN" \
-            -d "grant_type=refresh_token" \
-            -d "scope=$SCOPE")
-
-        # Check for error
-        if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
-            echo "Error refreshing token:"
-            echo "$RESPONSE" | jq -r '.error_description'
+        # The shared refresh prints the new token on stdout; this command only
+        # reports the outcome. On failure it has already said why on stderr and
+        # left credentials.json unchanged.
+        if ! refresh_access_token > /dev/null; then
             exit 1
         fi
-
-        # Save new credentials, stamping an absolute expiry so the mail/calendar
-        # scripts can skip their per-command token pre-flight.
-        EXPIRES_IN=$(echo "$RESPONSE" | jq -r '.expires_in // 3600')
-        echo "$RESPONSE" | jq --argjson at "$((NOW + EXPIRES_IN))" '. + {expires_at: $at}' > "$CREDS_FILE"
-        chmod 600 "$CREDS_FILE"
-
         echo "Token refreshed successfully"
         ;;
 

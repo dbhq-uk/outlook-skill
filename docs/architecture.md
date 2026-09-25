@@ -21,7 +21,7 @@ the mail that has arrived since.
 
 ## No server, no daemon, no service
 
-Four bash scripts, `curl`, `jq`, and the Microsoft Graph v1.0 REST API. Nothing runs between
+Four bash scripts and the small library they share, `curl`, `jq`, and the Microsoft Graph v1.0 REST API. Nothing runs between
 commands, nothing listens on a port, and there is no component of this pack you have to trust
 that is not a file in the repository.
 
@@ -29,7 +29,8 @@ Authentication is a **delegated** OAuth flow, not application permissions. The d
 matters: a delegated token can only ever do what the signed-in person can do in their own
 mailbox. There is no tenant-wide grant, no admin consent, and nothing here can reach another
 person's mail. Tokens live under `~/.dbhq/outlook/<account>/` at mode `600` and refresh
-themselves when a command needs it.
+themselves when a command needs it. A refresh that fails leaves the stored tokens exactly as
+they were, so a network blip never costs you the sign-in.
 
 Five scopes are requested and no more: `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`,
 `User.Read`, `offline_access`.

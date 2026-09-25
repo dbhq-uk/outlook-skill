@@ -46,6 +46,7 @@ if [ -f "$BASE_DIR/config.json" ] && [ ! -d "$BASE_DIR/default" ]; then
 fi
 
 CONFIG_DIR="$BASE_DIR/$ACCOUNT"
+# shellcheck disable=SC2034 # read by lib/graph.sh
 CONFIG_FILE="$CONFIG_DIR/config.json"
 CREDS_FILE="$CONFIG_DIR/credentials.json"
 GRAPH_URL="https://graph.microsoft.com/v1.0"
@@ -85,65 +86,29 @@ if [ ! -f "$CREDS_FILE" ]; then
 fi
 
 # --- Token management -------------------------------------------------------
-# The access token is resolved from a locally-stored absolute expiry
+# The token code lives in lib/graph.sh, shared by every script, so a fix to it
+# lands once. The access token is resolved from a locally-stored absolute expiry
 # (expires_at), so the common path makes NO network pre-flight call. The token
 # is refreshed over the network only when it is missing/expired, or when Graph
 # rejects it mid-run (handled reactively in api_call).
+#
+# The library is found beside this script's real location, following symlinks,
+# so it resolves however the script was reached (plugin, symlinked skill
+# directory, or a symlink to the script itself).
+_self="${BASH_SOURCE[0]}"
+while [ -L "$_self" ]; do
+    _dir=$(cd -P "$(dirname "$_self")" && pwd)
+    _self=$(readlink "$_self")
+    case "$_self" in /*) ;; *) _self="$_dir/$_self" ;; esac
+done
+OUTLOOK_SCRIPT_DIR=$(cd -P "$(dirname "$_self")" && pwd)
+unset _self _dir
+# shellcheck source=lib/graph.sh
+. "$OUTLOOK_SCRIPT_DIR/lib/graph.sh"
 
-# Refresh the access token, stamp an absolute expiry into credentials.json, and
-# print the new access token. Errors go to stderr so captured stdout stays a
-# clean token (empty on failure -> the guard below catches it).
-refresh_access_token() {
-    local refresh_token client_id client_secret now response expires_in
-    refresh_token=$(jq -r '.refresh_token // empty' "$CREDS_FILE")
-    client_id=$(jq -r '.client_id // empty' "$CONFIG_FILE")
-    client_secret=$(jq -r '.client_secret // empty' "$CONFIG_FILE")
-
-    if [ -z "$refresh_token" ]; then
-        echo "Error: No refresh token. Run outlook-setup.sh to re-authenticate." >&2
-        return 1
-    fi
-
-    now=$(date +%s)
-    response=$(curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "client_id=$client_id" \
-        -d "client_secret=$client_secret" \
-        -d "refresh_token=$refresh_token" \
-        -d "grant_type=refresh_token" \
-        -d "scope=offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read")
-
-    if echo "$response" | jq -e '.error' > /dev/null 2>&1; then
-        echo "Error refreshing token: $(echo "$response" | jq -r '.error_description // .error')" >&2
-        return 1
-    fi
-
-    expires_in=$(echo "$response" | jq -r '.expires_in // 3600')
-    echo "$response" | jq --argjson at "$((now + expires_in))" '. + {expires_at: $at}' > "$CREDS_FILE"
-    chmod 600 "$CREDS_FILE"
-    jq -r '.access_token' "$CREDS_FILE"
-}
-
-# Print a valid access token, refreshing over the network only when needed.
-ensure_valid_token() {
-    local access_token expires_at now
-    access_token=$(jq -r '.access_token // empty' "$CREDS_FILE")
-    expires_at=$(jq -r '.expires_at // 0' "$CREDS_FILE")
-    now=$(date +%s)
-
-    # 60s safety margin. A missing/zero expires_at always falls through to refresh
-    # (e.g. first run after upgrade, before an expiry has been stamped).
-    if [ -n "$access_token" ] && [ "$now" -lt "$((expires_at - 60))" ]; then
-        echo "$access_token"
-        return 0
-    fi
-    refresh_access_token
-}
-
-ACCESS_TOKEN=$(ensure_valid_token) || true
-
-if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
-    echo "Error: Invalid access token. Run outlook-setup.sh to re-authenticate."
+# A failed refresh has already said why on stderr, and left credentials.json
+# as it was.
+if ! ACCESS_TOKEN=$(ensure_valid_token) || [ -z "$ACCESS_TOKEN" ]; then
     exit 1
 fi
 
@@ -172,14 +137,18 @@ _graph_request() {
 # surface it — but a legitimately empty body (HTTP 204/202 from DELETE/send) is
 # left empty, since callers treat "no .error" as success.
 api_call() {
-    local response rc
+    local response rc new_token
     response=$(_graph_request "$@") && rc=0 || rc=$?
 
     if [ -z "${OUTLOOK_TOKEN_RETRIED:-}" ] && \
        printf '%s' "$response" | jq -e 'objects | .error.code == "InvalidAuthenticationToken"' >/dev/null 2>&1; then
         OUTLOOK_TOKEN_RETRIED=1
-        ACCESS_TOKEN=$(refresh_access_token) || true
-        response=$(_graph_request "$@") && rc=0 || rc=$?
+        # Retry only with a new token. A failed refresh has explained itself on
+        # stderr and left credentials.json alone; the original error stands.
+        if new_token=$(refresh_access_token); then
+            ACCESS_TOKEN="$new_token"
+            response=$(_graph_request "$@") && rc=0 || rc=$?
+        fi
     fi
 
     if [ "$rc" -ne 0 ] && [ -z "$response" ]; then

@@ -258,6 +258,7 @@ thousand messages takes five to fifteen minutes.
 | `~/.dbhq/outlook/<account>/config.json` | Client ID, secret, tenant, redirect URI, scopes (`600`) |
 | `~/.dbhq/outlook/<account>/credentials.json` | Access and refresh tokens (`600`) |
 | `~/.dbhq/outlook/<account>/id_cache.json` | Short ID to full Graph ID |
+| `~/.dbhq/outlook/<account>/.token.lock` | Empty. Held during a token refresh so two commands do not refresh at once |
 
 A pre-multi-account install with flat `~/.dbhq/outlook/*.json` files is migrated into
 `default/` on the first run of any script.
