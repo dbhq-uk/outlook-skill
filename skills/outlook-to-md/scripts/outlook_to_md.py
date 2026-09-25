@@ -6,23 +6,29 @@ Extract emails from Outlook PST files into an organized archive of markdown
 files, raw email backups, and attachments with integrity verification.
 
 Usage:
-    python outlook_to_md.py <pst_file> <output_dir>           # Full extraction
-    python outlook_to_md.py <pst_file> <output_dir> --append  # Append new emails only
+    python outlook_to_md.py <pst_file> <output_dir>              # New archive
+    python outlook_to_md.py <pst_file> <output_dir> --append     # Append new emails only
+    python outlook_to_md.py <pst_file> <output_dir> --overwrite  # Replace an archive
 
 The --append flag enables incremental extraction: it loads the existing index.csv
 and skips any emails whose Message-ID is already in the archive. This lets you
 update the PST file and re-run extraction to add only new emails.
+
+Without --append or --overwrite, an output directory that already holds an
+archive is refused rather than half-replaced.
 """
 
 import argparse
 import csv
 import hashlib
+import json
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
+from email.utils import getaddresses
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -144,6 +150,73 @@ def parse_email_address(addr_str: str) -> tuple[str, str]:
     return ("", addr_str.strip())
 
 
+# Characters that make a display name need quoting in an address (RFC 5322
+# "specials"). A name with a comma in it, unquoted, reads as two addresses.
+_ADDRESS_SPECIALS = set('()<>[]:;@\\,."')
+
+
+def format_address(name: str, addr: str) -> str:
+    """One address as a string: 'Name <addr>', with the name quoted if it needs it.
+
+    Unlike email.utils.formataddr this never RFC 2047-encodes a non-ASCII name,
+    because the result goes into markdown for people to read.
+    """
+    name = (name or '').strip()
+    addr = (addr or '').strip()
+    if not name:
+        return addr
+    if not addr:
+        return name
+    if any(c in _ADDRESS_SPECIALS for c in name):
+        name = '"' + name.replace('\\', '\\\\').replace('"', '\\"') + '"'
+    return f'{name} <{addr}>'
+
+
+def split_addresses(value) -> list:
+    """Split an address header (To, Cc, Bcc) into one string per address.
+
+    Splitting on commas broke any display name with a comma in it:
+    '"Jones, Ann" <ann@example.com>' became '"Jones' and 'Ann" <ann@example.com>'.
+    A header parsed with policy.default carries its addresses already parsed,
+    before any encoded name is decoded, so those are used when present.
+    Anything else goes through email.utils.getaddresses. If neither finds an
+    address, the header is kept whole rather than lost.
+    """
+    if not value:
+        return []
+    pairs = None
+    addresses = getattr(value, 'addresses', None)
+    if addresses is not None:
+        try:
+            pairs = [(a.display_name, a.addr_spec) for a in addresses]
+        except Exception:
+            pairs = None
+    if pairs is None:
+        pairs = getaddresses([str(value)])
+    out = [format_address(name, addr) for name, addr in pairs if (name or '').strip() or (addr or '').strip()]
+    if not out and str(value).strip():
+        out = [str(value).strip()]
+    return out
+
+
+# Characters JSON leaves as they are but YAML does not accept in a document
+# (C1 controls, the Unicode line and paragraph separators, byte-order marks,
+# non-characters and lone surrogates). They are written as \u escapes.
+_YAML_UNSAFE = re.compile('[\x7f-\x9f\u2028\u2029\ufeff\ufffe\uffff\ud800-\udfff]')
+
+
+def yaml_str(value) -> str:
+    """A YAML double-quoted scalar for any string.
+
+    A JSON string is valid YAML, so json.dumps escapes quotes, backslashes and
+    control characters correctly. Writing f'"{value}"' did not: a subject such
+    as 'Re: the "final" draft' made a frontmatter block no YAML parser accepts.
+    Non-ASCII text is kept readable rather than escaped.
+    """
+    text = json.dumps('' if value is None else str(value), ensure_ascii=False)
+    return _YAML_UNSAFE.sub(lambda m: '\\u%04x' % ord(m.group()), text)
+
+
 def format_date_human(dt: datetime) -> str:
     """Format datetime for human-readable display."""
     return dt.strftime("%B %d, %Y at %I:%M %p")
@@ -161,6 +234,7 @@ class EmailExtractor:
         verbose: bool = False,
         append: bool = False,
         owner_email: str = None,
+        overwrite: bool = False,
     ):
         self.pst_path = pst_path
         self.output_dir = output_dir
@@ -172,7 +246,10 @@ class EmailExtractor:
         self.tz = ZoneInfo(target_timezone) if target_timezone else None
         self.verbose = verbose
         self.append = append
+        self.overwrite = overwrite
         self.owner_email = owner_email
+        # 'NEW', 'APPEND' or 'OVERWRITE', settled in extract().
+        self.mode = 'APPEND' if append else 'NEW'
 
         self.stats = {'total': 0, 'processed': 0, 'errors': 0, 'attachments': 0, 'skipped': 0}
         self.index_data = []
@@ -196,6 +273,33 @@ class EmailExtractor:
         """Log error message."""
         self.error_log.append(f"{datetime.now().isoformat()} - {message}")
         print(f"ERROR: {message}", file=sys.stderr)
+
+    # The files and the folder this tool writes at the top of an archive. These,
+    # and nothing else in the output directory, are what --overwrite removes.
+    ARCHIVE_FILES = ('index.csv', 'index.md', 'manifest.sha256', 'extraction_log.txt')
+
+    def holds_archive(self) -> bool:
+        """True if the output directory already holds an archive this tool wrote."""
+        if any((self.output_dir / name).exists() for name in self.ARCHIVE_FILES):
+            return True
+        return self.emails_dir.is_dir() and any(self.emails_dir.iterdir())
+
+    def clear_archive(self):
+        """Remove the previous archive: emails/ and the top-level files above.
+
+        Anything else in the output directory is left alone.
+        """
+        source = self.pst_path.resolve()
+        emails = self.emails_dir.resolve()
+        if source == emails or emails in source.parents:
+            print(f"Error: the source {self.pst_path} is inside {self.emails_dir}, which --overwrite would delete.")
+            sys.exit(1)
+        if self.emails_dir.is_dir():
+            shutil.rmtree(self.emails_dir)
+        for name in self.ARCHIVE_FILES:
+            path = self.output_dir / name
+            if path.is_file():
+                path.unlink()
 
     def setup_directories(self):
         """Create output directory structure."""
@@ -323,6 +427,19 @@ class EmailExtractor:
 
     def extract(self):
         """Main extraction method."""
+        # A run without --append used to announce "OVERWRITE (replacing existing
+        # emails)" and then replace nothing: the old email folders stayed on
+        # disk, missing from the new index. Now an existing archive is either
+        # appended to, replaced for real with --overwrite, or refused.
+        if not self.append and self.holds_archive():
+            if not self.overwrite:
+                print(f"Error: {self.output_dir} already holds an archive.")
+                print("  To add new mail to it:  --append")
+                print("  To replace it:          --overwrite (deletes its emails/ folder and index files)")
+                sys.exit(1)
+            self.clear_archive()
+            self.mode = 'OVERWRITE'
+
         self.setup_directories()
 
         print(f"Processing: {self.pst_path}")
@@ -330,8 +447,10 @@ class EmailExtractor:
         if self.append:
             print("Mode: APPEND (skipping existing emails)")
             self._load_existing_index()
+        elif self.mode == 'OVERWRITE':
+            print("Mode: OVERWRITE (the previous archive was removed)")
         else:
-            print("Mode: OVERWRITE (replacing existing emails)")
+            print("Mode: NEW")
         self._build_provenance()
         print()
 
@@ -463,9 +582,9 @@ class EmailExtractor:
                 else:
                     sender = self.owner_email
 
-        to_list = [addr.strip() for addr in to_str.split(',') if addr.strip()] if to_str else []
-        cc_list = [addr.strip() for addr in cc_str.split(',') if addr.strip()] if cc_str else []
-        bcc_list = [addr.strip() for addr in bcc_str.split(',') if addr.strip()] if bcc_str else []
+        to_list = split_addresses(to_str)
+        cc_list = split_addresses(cc_str)
+        bcc_list = split_addresses(bcc_str)
 
         message_id = msg.get('Message-ID', '')
 
@@ -741,42 +860,38 @@ class EmailExtractor:
         to_display = ', '.join(email_data.get('to_list', []))
         cc_display = ', '.join(email_data.get('cc_list', []))
 
-        # Build YAML frontmatter
+        # Build YAML frontmatter. Every string goes through yaml_str, so a quote,
+        # backslash or colon in a subject or a name cannot break the block.
         yaml_lines = [
             "---",
-            f'message_id: "{email_data.get("message_id", "")}"',
-            f'date: "{sent_date.isoformat()}"',
-            f'from: "{email_data["sender"]}"',
-            "to:",
+            f'message_id: {yaml_str(email_data.get("message_id", ""))}',
+            f'date: {yaml_str(sent_date.isoformat())}',
+            f'from: {yaml_str(email_data["sender"])}',
         ]
-        for addr in email_data.get('to_list', []):
-            yaml_lines.append(f'  - "{addr}"')
-        if not email_data.get('to_list'):
-            yaml_lines.append("  []")
+        for key in ('to', 'cc', 'bcc'):
+            addresses = email_data.get(f'{key}_list', [])
+            if addresses:
+                yaml_lines.append(f"{key}:")
+                yaml_lines.extend(f'  - {yaml_str(addr)}' for addr in addresses)
+            else:
+                yaml_lines.append(f"{key}: []")
 
-        yaml_lines.append("cc:")
-        for addr in email_data.get('cc_list', []):
-            yaml_lines.append(f'  - "{addr}"')
-        if not email_data.get('cc_list'):
-            yaml_lines.append("  []")
-
-        yaml_lines.append("bcc: []")
-        yaml_lines.append(f'subject: "{subject}"')
+        yaml_lines.append(f'subject: {yaml_str(subject)}')
         yaml_lines.append(f'has_attachments: {str(bool(attachments)).lower()}')
         yaml_lines.append(f'attachment_count: {len(attachments)}')
 
         if attachments:
             yaml_lines.append("attachments:")
             for att in attachments:
-                yaml_lines.append(f'  - filename: "{att["filename"]}"')
-                yaml_lines.append(f'    original_name: "{att["original_name"]}"')
+                yaml_lines.append(f'  - filename: {yaml_str(att["filename"])}')
+                yaml_lines.append(f'    original_name: {yaml_str(att["original_name"])}')
                 yaml_lines.append(f'    size_bytes: {att["size_bytes"]}')
-                yaml_lines.append(f'    content_type: "{att["content_type"]}"')
-                yaml_lines.append(f'    sha256: "{att["sha256"]}"')
+                yaml_lines.append(f'    content_type: {yaml_str(att["content_type"])}')
+                yaml_lines.append(f'    sha256: {yaml_str(att["sha256"])}')
 
-        yaml_lines.append(f'pst_folder: "{email_data.get("folder_path", "Unknown")}"')
-        yaml_lines.append(f'extraction_date: "{datetime.now(timezone.utc).isoformat()}"')
-        yaml_lines.append(f'source_file: "{self.pst_path.name}"')
+        yaml_lines.append(f'pst_folder: {yaml_str(email_data.get("folder_path", "Unknown"))}')
+        yaml_lines.append(f'extraction_date: {yaml_str(datetime.now(timezone.utc).isoformat())}')
+        yaml_lines.append(f'source_file: {yaml_str(self.pst_path.name)}')
         yaml_lines.append("---")
 
         # Build markdown content
@@ -989,7 +1104,7 @@ class EmailExtractor:
             "",
             f"Source: {self.pst_path}",
             f"Output: {self.output_dir}",
-            f"Mode: {'APPEND' if self.append else 'OVERWRITE'}",
+            f"Mode: {self.mode}",
             f"Started: {datetime.now().isoformat()}",
             "",
             "Statistics:",
@@ -1053,8 +1168,14 @@ def main():
         help="Render every date in this IANA zone, e.g. Europe/London (default: the offset each message was sent with)",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--append", action="store_true", help="Append mode: skip emails already in the archive (by message ID)"
+    )
+    mode.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace an existing archive: delete its emails/ folder and index files first",
     )
     parser.add_argument("--owner-email", help="PST owner's email address (used to fix MAILER-DAEMON sent items)")
 
@@ -1075,6 +1196,7 @@ def main():
         verbose=args.verbose,
         append=args.append,
         owner_email=args.owner_email,
+        overwrite=args.overwrite,
     )
 
     extractor.extract()

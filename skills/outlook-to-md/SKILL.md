@@ -133,7 +133,7 @@ Each `email.md` contains:
 ## CLI Reference
 
 ```
-outlook_to_md.py [-h] [--include-deleted] [--timezone TZ] [--verbose] [--append] [--owner-email EMAIL] pst_file output_dir
+outlook_to_md.py [-h] [--include-deleted] [--timezone TZ] [--verbose] [--append | --overwrite] [--owner-email EMAIL] pst_file output_dir
 ```
 
 | Argument | Description |
@@ -144,6 +144,10 @@ outlook_to_md.py [-h] [--include-deleted] [--timezone TZ] [--verbose] [--append]
 | `--timezone TZ` | Render every date in this IANA zone, e.g. `Europe/London`. An unknown name is refused. Default: the offset each message was sent with |
 | `--verbose`, `-v` | Verbose output with per-email logging |
 | `--append` | Skip emails already in archive (by Message-ID) |
+| `--overwrite` | Replace an existing archive: deletes its `emails/` folder and index files first |
+
+With neither flag, an output directory that already holds an archive is refused. Use
+`--append` to add to it. Use `--overwrite` only when the user has asked to rebuild it.
 | `--owner-email EMAIL` | PST owner's email (fixes MAILER-DAEMON in sent items) |
 
 ## Extraction Backends

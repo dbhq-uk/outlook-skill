@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import os
 import sys
 import tempfile
 import unittest
@@ -864,6 +865,236 @@ class TestManifestProvenance(unittest.TestCase):
 
             index_md = (out / "index.md").read_text()
             self.assertIn("**Total Emails:** 2", index_md, "totals reflect this run only, not the whole archive")
+
+
+def load_yaml_module():
+    """PyYAML, which CI installs for these tests. Skipped locally without it."""
+    try:
+        import yaml
+    except ImportError:
+        if os.environ.get("CI"):
+            raise
+        raise unittest.SkipTest("PyYAML is not installed (pip install pyyaml); CI runs these")
+    return yaml
+
+
+def frontmatter(md_text: str) -> str:
+    """The YAML between the opening '---' and the next '---' line."""
+    lines = md_text.split("\n")
+    assert lines[0] == "---", lines[0]
+    end = lines.index("---", 1)
+    return "\n".join(lines[1:end])
+
+
+def extract_one(tmp: str, eml: str, **kwargs) -> Path:
+    """Archive one .eml from a staging folder; return the output directory."""
+    staging = Path(tmp) / "staging" / "Inbox"
+    staging.mkdir(parents=True, exist_ok=True)
+    (staging / "1.eml").write_text(eml, encoding="utf-8")
+    out = Path(tmp) / "out"
+    with redirect_stdout(io.StringIO()):
+        outlook_to_md.EmailExtractor(pst_path=staging.parent, output_dir=out, **kwargs).extract()
+    return out
+
+
+class TestAddressLists(unittest.TestCase):
+    """Address headers are parsed as addresses, not split on commas.
+
+    A display name with a comma in it, such as "Jones, Ann", came out as two
+    broken entries.
+    """
+
+    def test_quoted_name_with_a_comma_is_one_address(self):
+        self.assertEqual(
+            outlook_to_md.split_addresses('"Jones, Ann" <ann@example.com>, bob@example.com'),
+            ['"Jones, Ann" <ann@example.com>', "bob@example.com"],
+        )
+
+    def test_empty_header_is_no_addresses(self):
+        self.assertEqual(outlook_to_md.split_addresses(""), [])
+        self.assertEqual(outlook_to_md.split_addresses(None), [])
+
+    def test_a_header_with_no_address_is_kept_whole(self):
+        self.assertEqual(outlook_to_md.split_addresses("undisclosed-recipients:;"), ["undisclosed-recipients:;"])
+
+    def test_a_name_with_a_quote_is_escaped(self):
+        self.assertEqual(outlook_to_md.format_address('Ann "AJ" Jones', "a@x.com"), '"Ann \\"AJ\\" Jones" <a@x.com>')
+
+    def test_a_non_ascii_name_is_not_encoded(self):
+        self.assertEqual(outlook_to_md.format_address("Zoë Brontë", "z@x.com"), "Zoë Brontë <z@x.com>")
+
+    EML = (
+        "Message-ID: <addr@example.com>\n"
+        "Date: Tue, 01 Sep 2026 09:00:00 +0000\n"
+        "From: Carol <carol@example.com>\n"
+        'To: "Jones, Ann" <ann@example.com>, bob@example.com\n'
+        "Cc: =?utf-8?q?Smith=2C_Jo?= <jo@example.com>, Dee <dee@example.com>\n"
+        "Bcc: eve@example.com\n"
+        "Subject: Addresses\n"
+        "Content-Type: text/plain; charset=utf-8\n\n"
+        "Body.\n"
+    )
+
+    def test_archive_keeps_each_address_whole(self):
+        yaml = load_yaml_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            out = extract_one(tmp, self.EML)
+            md = next(out.rglob("email.md")).read_text(encoding="utf-8")
+            meta = yaml.safe_load(frontmatter(md))
+            self.assertEqual(meta["to"], ['"Jones, Ann" <ann@example.com>', "bob@example.com"])
+            # An encoded name with a comma in it decodes to one address too.
+            self.assertEqual(meta["cc"], ['"Smith, Jo" <jo@example.com>', "Dee <dee@example.com>"])
+            self.assertEqual(meta["bcc"], ["eve@example.com"])
+            with open(out / "index.csv", newline="", encoding="utf-8") as f:
+                row = next(csv.DictReader(f))
+            self.assertEqual((row["to_name"], row["to_email"]), ("Jones, Ann", "ann@example.com"))
+
+
+class TestFrontmatterIsValidYaml(unittest.TestCase):
+    """Every frontmatter block parses, whatever the subject and names hold.
+
+    Values were written as f'"{value}"', so a subject with a double quote in it
+    produced a block that yaml.safe_load rejected.
+    """
+
+    SUBJECT = 'Re: the "final" draft \\ C:\\temp: 50% off # not a comment'
+    EML = (
+        "Message-ID: <yaml@example.com>\n"
+        "Date: Tue, 01 Sep 2026 09:00:00 +0000\n"
+        'From: "O\\"Brien, Pat" <pat@example.com>\n'
+        'To: "Ann \\"AJ\\" Jones" <ann@example.com>\n'
+        f"Subject: {SUBJECT}\n"
+        "MIME-Version: 1.0\n"
+        'Content-Type: multipart/mixed; boundary="XYZ"\n\n'
+        "--XYZ\n"
+        "Content-Type: text/plain; charset=utf-8\n\n"
+        "Body.\n"
+        "--XYZ\n"
+        'Content-Type: text/plain; name="notes: \\"v2\\".txt"\n'
+        'Content-Disposition: attachment; filename="notes: \\"v2\\".txt"\n'
+        "Content-Transfer-Encoding: base64\n\n"
+        "YXR0YWNobWVudCBib2R5\n"
+        "--XYZ--\n"
+    )
+
+    def test_quotes_backslashes_and_colons_survive(self):
+        yaml = load_yaml_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            out = extract_one(tmp, self.EML)
+            md = next(out.rglob("email.md")).read_text(encoding="utf-8")
+            meta = yaml.safe_load(frontmatter(md))
+            self.assertEqual(meta["subject"], self.SUBJECT)
+            self.assertEqual(meta["from"], '"O\\"Brien, Pat" <pat@example.com>')
+            self.assertEqual(meta["to"], ['"Ann \\"AJ\\" Jones" <ann@example.com>'])
+            self.assertEqual(meta["attachments"][0]["original_name"], 'notes: "v2".txt')
+            self.assertEqual(meta["message_id"], "<yaml@example.com>")
+
+    def test_every_block_in_an_archive_parses(self):
+        yaml = load_yaml_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            staging = Path(tmp) / "staging"
+            for rel, eml in READPST_TREE.items():
+                path = staging / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(eml)
+            (staging / "Personal folders" / "Inbox" / "3.eml").write_text(self.EML, encoding="utf-8")
+            out = Path(tmp) / "out"
+            with redirect_stdout(io.StringIO()):
+                outlook_to_md.EmailExtractor(pst_path=staging, output_dir=out).extract()
+            mds = list(out.rglob("email.md"))
+            self.assertEqual(len(mds), 4)
+            for md in mds:
+                with self.subTest(md=md.parent.name):
+                    self.assertIsInstance(yaml.safe_load(frontmatter(md.read_text(encoding="utf-8"))), dict)
+
+    def test_yaml_str_escapes_what_yaml_rejects(self):
+        yaml = load_yaml_module()
+        for value in ['say "hi"', "back\\slash", "a: b", "tab\tand\nnewline", "C1\x85 LS\u2028 BOM\ufeff", "é ü 中文", ""]:
+            with self.subTest(value=value):
+                self.assertEqual(yaml.safe_load("k: " + outlook_to_md.yaml_str(value))["k"], value)
+
+
+class TestOverwriteMode(unittest.TestCase):
+    """A run into an existing archive appends, replaces it for real, or refuses.
+
+    It used to print "Mode: OVERWRITE (replacing existing emails)" and replace
+    nothing: the old email folders stayed on disk, missing from the new index.
+    """
+
+    FIRST = (
+        "Message-ID: <first@example.com>\nDate: Tue, 01 Sep 2026 09:00:00 +0000\n"
+        "From: Alice <alice@example.com>\nTo: Bob <bob@example.com>\n"
+        "Subject: First\nContent-Type: text/plain; charset=utf-8\n\nOne.\n"
+    )
+    SECOND = (
+        "Message-ID: <second@example.com>\nDate: Wed, 02 Sep 2026 09:00:00 +0000\n"
+        "From: Carol <carol@example.com>\nTo: Bob <bob@example.com>\n"
+        "Subject: Second\nContent-Type: text/plain; charset=utf-8\n\nTwo.\n"
+    )
+
+    def stage(self, tmp: str, name: str, eml: str) -> Path:
+        staging = Path(tmp) / name / "Inbox"
+        staging.mkdir(parents=True)
+        (staging / "1.eml").write_text(eml)
+        return staging.parent
+
+    def run_extract(self, source: Path, out: Path, **kwargs) -> str:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            outlook_to_md.EmailExtractor(pst_path=source, output_dir=out, **kwargs).extract()
+        return buf.getvalue()
+
+    def test_a_fresh_folder_is_a_new_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            printed = self.run_extract(self.stage(tmp, "a", self.FIRST), out)
+            self.assertIn("Mode: NEW", printed)
+            self.assertNotIn("replacing", printed)
+            self.assertIn("Mode: NEW", (out / "extraction_log.txt").read_text())
+
+    def test_an_existing_archive_is_refused_without_a_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            self.run_extract(self.stage(tmp, "a", self.FIRST), out)
+            before = sorted(str(p.relative_to(out)) for p in out.rglob("*"))
+            buf = io.StringIO()
+            with redirect_stdout(buf), self.assertRaises(SystemExit) as caught:
+                outlook_to_md.EmailExtractor(pst_path=self.stage(tmp, "b", self.SECOND), output_dir=out).extract()
+            self.assertEqual(caught.exception.code, 1)
+            self.assertIn("already holds an archive", buf.getvalue())
+            self.assertIn("--append", buf.getvalue())
+            self.assertEqual(sorted(str(p.relative_to(out)) for p in out.rglob("*")), before)
+
+    def test_overwrite_removes_the_old_emails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            self.run_extract(self.stage(tmp, "a", self.FIRST), out)
+            (out / "my-notes.txt").write_text("not ours")
+            printed = self.run_extract(self.stage(tmp, "b", self.SECOND), out, overwrite=True)
+            self.assertIn("Mode: OVERWRITE", printed)
+            subjects = [m.read_text() for m in out.rglob("email.md")]
+            self.assertEqual(len(subjects), 1, "the old email folder is still on disk")
+            self.assertIn('subject: "Second"', subjects[0])
+            with open(out / "index.csv", newline="", encoding="utf-8") as f:
+                self.assertEqual([r["message_id"] for r in csv.DictReader(f)], ["<second@example.com>"])
+            self.assertEqual((out / "my-notes.txt").read_text(), "not ours", "overwrite touched a file it did not write")
+            self.assertIn("Mode: OVERWRITE", (out / "extraction_log.txt").read_text())
+
+    def test_overwrite_refuses_a_source_inside_the_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            self.run_extract(self.stage(tmp, "a", self.FIRST), out)
+            source = out / "emails" / "Inbox"
+            with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                outlook_to_md.EmailExtractor(pst_path=source, output_dir=out, overwrite=True).extract()
+            self.assertTrue(source.is_dir(), "overwrite deleted its own source")
+
+    def test_append_and_overwrite_cannot_be_combined(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = ["outlook_to_md.py", str(self.stage(tmp, "a", self.FIRST)), str(Path(tmp) / "out"), "--append", "--overwrite"]
+            with patch.object(sys, "argv", argv), patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit) as caught:
+                outlook_to_md.main()
+            self.assertEqual(caught.exception.code, 2)
 
 
 class TestModuleContract(unittest.TestCase):
