@@ -41,6 +41,7 @@ shellcheck skills/outlook/scripts/*.sh # lint (warnings should be clean)
 bash skills/outlook/tests/helpers_test.sh  # offline unit tests (no account needed)
 bash skills/outlook/tests/token_test.sh    # token refresh against a fake curl
 bash skills/outlook/tests/calendar_test.sh # calendar verbs against a fake curl
+bash skills/outlook/tests/mail_test.sh     # draft From and send summary against a fake curl
 python3 -m pytest skills/outlook-to-md/tests/ -q # archive suite (no PST needed)
 claude plugin validate .                     # manifest + structure
 ```

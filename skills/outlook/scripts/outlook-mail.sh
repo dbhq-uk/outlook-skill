@@ -589,6 +589,36 @@ draft_from_fragment() {
     jq -n --argjson from "$(from_to_json "$addr" "${OUTLOOK_FROM_NAME:-}")" '{from: $from}'
 }
 
+# Set OUTLOOK_FROM_ADDRESS on a draft that already exists. reply, mdreply,
+# followup and forward get their draft from createReplyAll / createForward,
+# which take no `from`, so without this a user who had set the variable could
+# send a reply from the primary address without noticing. $1 is the draft ID,
+# $2 the draft JSON so far. Prints the draft JSON after the change (unchanged
+# when the variable is unset). On failure it says so and exits: the draft
+# exists, but it must not be left looking like it is ready to send.
+apply_from_to_draft() {
+    local draft_id="$1" draft_json="$2" fragment result
+    fragment=$(draft_from_fragment)
+    if [ "$fragment" = "{}" ]; then
+        printf '%s' "$draft_json"
+        return 0
+    fi
+    result=$(api_call PATCH "/me/messages/$draft_id" "$fragment")
+    if [ -z "$result" ] || printf '%s' "$result" | jq -e '.error' >/dev/null 2>&1; then
+        {
+            echo "Error: draft ${draft_id: -20} was created, but its From could not be set to $OUTLOOK_FROM_ADDRESS:"
+            printf '%s' "$result" | jq -r '.error.message // .error.code // "no response"' 2>/dev/null
+            echo "Set it with: outlook-mail.sh update ${draft_id: -20} from \"$OUTLOOK_FROM_ADDRESS\""
+        } >&2
+        exit 1
+    fi
+    printf '%s' "$result"
+}
+
+# The From line for a draft summary. A draft with no `from` goes out from the
+# mailbox's primary address, so say that rather than print nothing.
+DRAFT_FROM_JQ='(.from.emailAddress.address // "(mailbox default)")'
+
 # --- Markdown -> Outlook-safe HTML -------------------------------------------
 # Aptos is the Microsoft 365 default font since 2024; the stack falls back to
 # Segoe UI on older Outlook and Roboto / system sans elsewhere. All styles are
@@ -970,7 +1000,7 @@ case "$1" in
         echo "Draft created!"
         echo "Draft ID: ${draft_id: -20}"
         echo
-        echo "$result" | jq -r '"To: \(.toRecipients[0].emailAddress.address)", "Subject: \(.subject)", "Body: \(.body.content)"'
+        echo "$result" | jq -r '"From: \('"$DRAFT_FROM_JQ"')", "To: \(.toRecipients[0].emailAddress.address)", "Subject: \(.subject)", "Body: \(.body.content)"'
         ;;
 
     mddraft)
@@ -1019,7 +1049,7 @@ case "$1" in
         echo "Draft created (HTML from Markdown)!"
         echo "Draft ID: ${draft_id: -20}"
         echo
-        echo "$result" | jq -r '"To: \(.toRecipients[0].emailAddress.address)", "Subject: \(.subject)"'
+        echo "$result" | jq -r '"From: \('"$DRAFT_FROM_JQ"')", "To: \(.toRecipients[0].emailAddress.address)", "Subject: \(.subject)"'
         ;;
 
     reply)
@@ -1047,11 +1077,13 @@ case "$1" in
             echo "$result" | jq -r '.error.message // .'
             exit 1
         fi
+        result=$(apply_from_to_draft "$draft_id" "$result")
 
         echo "Reply draft created!"
         echo "Draft ID: ${draft_id: -20}"
         echo
         echo "$result" | jq -r '
+            "From:    \('"$DRAFT_FROM_JQ"')",
             "To:      \(.toRecipients | map(.emailAddress.address) | join(", "))",
             (if (.ccRecipients | length) > 0 then "Cc:      \(.ccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
             (if (.bccRecipients | length) > 0 then "Bcc:     \(.bccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
@@ -1274,15 +1306,17 @@ case "$1" in
 <span data-mdreply-chain-start=\"1\"></span>
 ${existing_body}"
 
-        # Step 4: PATCH the draft to update body with combined HTML
+        # Step 4: PATCH the draft to update body with combined HTML, and the
+        # From when OUTLOOK_FROM_ADDRESS is set (createReplyAll takes no from).
         patch_payload=$(jq -n \
             --arg body "$combined_body" \
+            --argjson from "$(draft_from_fragment)" \
             '{
                 body: {
                     contentType: "HTML",
                     content: $body
                 }
-            }')
+            } + $from')
 
         patch_result=$(api_call PATCH "/me/messages/$draft_id" "$patch_payload")
 
@@ -1296,6 +1330,7 @@ ${existing_body}"
         echo "Draft ID: ${draft_id: -20}"
         echo
         echo "$patch_result" | jq -r '
+            "From:    \('"$DRAFT_FROM_JQ"')",
             "To:      \(.toRecipients | map(.emailAddress.address) | join(", "))",
             (if (.ccRecipients | length) > 0 then "Cc:      \(.ccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
             (if (.bccRecipients | length) > 0 then "Bcc:     \(.bccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
@@ -1355,15 +1390,17 @@ Please let me know if you have any questions or need any additional information.
 <span data-mdreply-chain-start=\"1\"></span>
 ${existing_body}"
 
-        # Step 4: PATCH the draft to update body with combined HTML
+        # Step 4: PATCH the draft to update body with combined HTML, and the
+        # From when OUTLOOK_FROM_ADDRESS is set (createReplyAll takes no from).
         patch_payload=$(jq -n \
             --arg body "$combined_body" \
+            --argjson from "$(draft_from_fragment)" \
             '{
                 body: {
                     contentType: "HTML",
                     content: $body
                 }
-            }')
+            } + $from')
 
         patch_result=$(api_call PATCH "/me/messages/$draft_id" "$patch_payload")
 
@@ -1377,6 +1414,7 @@ ${existing_body}"
         echo "Draft ID: ${draft_id: -20}"
         echo
         echo "$patch_result" | jq -r '
+            "From:    \('"$DRAFT_FROM_JQ"')",
             "To:      \(.toRecipients | map(.emailAddress.address) | join(", "))",
             (if (.ccRecipients | length) > 0 then "Cc:      \(.ccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
             (if (.bccRecipients | length) > 0 then "Bcc:     \(.bccRecipients | map(.emailAddress.address) | join(", "))" else empty end),
@@ -1430,19 +1468,23 @@ ${existing_body}"
 <span data-mdreply-chain-start=\"1\"></span>
 ${existing_body}"
             patch_result=$(api_call PATCH "/me/messages/$draft_id" \
-                "$(jq -n --arg body "$combined_body" '{body: {contentType: "HTML", content: $body}}')")
+                "$(jq -n --arg body "$combined_body" --argjson from "$(draft_from_fragment)" \
+                    '{body: {contentType: "HTML", content: $body}} + $from')")
             if echo "$patch_result" | jq -e '.error' > /dev/null 2>&1; then
                 echo "Error adding comment to forward draft:"
                 echo "$patch_result" | jq -r '.error.message'
                 exit 1
             fi
             result="$patch_result"
+        else
+            result=$(apply_from_to_draft "$draft_id" "$result")
         fi
 
         echo "Forward draft created!"
         echo "Draft ID: ${draft_id: -20}"
         echo
         echo "$result" | jq -r '
+            "From:    \('"$DRAFT_FROM_JQ"')",
             "To:      \(.toRecipients | map(.emailAddress.address) | join(", "))",
             "Subject: \(.subject)"
         '
@@ -1461,6 +1503,42 @@ ${existing_body}"
         if ! msg_id=$(resolve_message_id "$msg_id" "drafts"); then
             echo "Error: Draft not found with ID: $2"
             exit 1
+        fi
+
+        # Show exactly what is about to go out, read back from Graph rather than
+        # remembered, so a wrong identity or recipient is on screen before the
+        # send and not after. If the draft cannot be read, nothing is sent.
+        draft=$(api_call GET "/me/messages/$msg_id?\$select=from,toRecipients,ccRecipients,bccRecipients,subject,isDraft")
+        if ! printf '%s' "$draft" | jq -e 'type == "object" and (has("error") | not) and has("subject")' >/dev/null 2>&1; then
+            echo "Error: could not read the draft before sending, so nothing was sent:"
+            printf '%s' "$draft" | jq -r '.error.message // .error.code // "no response"' 2>/dev/null
+            exit 1
+        fi
+        if printf '%s' "$draft" | jq -e '.isDraft == false' >/dev/null 2>&1; then
+            echo "Error: ${msg_id: -20} is not a draft (it has already been sent). Nothing was sent."
+            exit 1
+        fi
+        from_addr=$(printf '%s' "$draft" | jq -r '.from.emailAddress.address // empty')
+        if [ -z "$from_addr" ]; then
+            from_addr="$(api_call GET "/me?\$select=mail,userPrincipalName" | jq -r '.mail // .userPrincipalName // "the mailbox primary address"' 2>/dev/null) (mailbox default)"
+        fi
+        attachments=$(api_call GET "/me/messages/$msg_id/attachments?\$select=name,isInline" \
+            | jq -r 'if .error then "(could not list: \(.error.message // .error.code))"
+                     else ([.value[]? | .name + (if .isInline then " (inline)" else "" end)] | if length == 0 then "(none)" else join(", ") end) end' 2>/dev/null)
+
+        echo "About to send:"
+        echo "  From:        $from_addr"
+        printf '%s' "$draft" | jq -r '
+            def addrs: if (. // []) | length == 0 then "(none)" else map(.emailAddress.address) | join(", ") end;
+            "  To:          \(.toRecipients | addrs)",
+            "  Cc:          \(.ccRecipients | addrs)",
+            "  Bcc:         \(.bccRecipients | addrs)",
+            "  Subject:     \(.subject // "(no subject)")"'
+        echo "  Attachments: ${attachments:-(none)}"
+        if [ -n "${OUTLOOK_FROM_ADDRESS:-}" ] \
+           && ! printf '%s\n' "${from_addr%% *}" | address_in_list "$OUTLOOK_FROM_ADDRESS"; then
+            echo "Warning: OUTLOOK_FROM_ADDRESS is $OUTLOOK_FROM_ADDRESS, but this draft sends from ${from_addr%% *}." >&2
+            echo "  Set it with: outlook-mail.sh update ${msg_id: -20} from \"$OUTLOOK_FROM_ADDRESS\"" >&2
         fi
 
         echo "Sending..."
