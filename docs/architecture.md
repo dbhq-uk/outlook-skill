@@ -30,7 +30,10 @@ matters: a delegated token can only ever do what the signed-in person can do in 
 mailbox. There is no tenant-wide grant, and nothing here can reach another person's mail.
 Delegated does not always mean no admin: whether a user may consent to `Mail.Send` and
 `Mail.ReadWrite` is the tenant's user-consent policy, and many tenants require an admin to
-approve an app that asks for them. Tokens live under `~/.dbhq/outlook/<account>/` at mode `600` and refresh
+approve an app that asks for them. The app is a **public client**: setup signs in with the
+authorisation-code flow and PKCE, so there is no client secret to store, and none to expire. It
+used to register a Web app with a two-year secret shared by every account, which would have
+stopped them all on the same day. Tokens live under `~/.dbhq/outlook/<account>/` at mode `600` and refresh
 themselves when a command needs it. A refresh that fails leaves the stored tokens exactly as
 they were, so a network blip never costs you the sign-in.
 

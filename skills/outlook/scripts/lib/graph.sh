@@ -10,7 +10,8 @@
 # The caller sets these before calling anything below:
 #   ACCOUNT      account name, used in messages
 #   CONFIG_DIR   ~/.dbhq/outlook/<account>
-#   CONFIG_FILE  $CONFIG_DIR/config.json    (client_id, client_secret)
+#   CONFIG_FILE  $CONFIG_DIR/config.json    (client_id; client_secret only on
+#                an app registered before setup moved to PKCE)
 #   CREDS_FILE   $CONFIG_DIR/credentials.json
 #
 # Every function here is safe to call under `set -e` and inside `$(...)`: a
@@ -20,6 +21,8 @@
 # shellcheck disable=SC2154 # ACCOUNT, CONFIG_DIR, CONFIG_FILE, CREDS_FILE come from the caller
 
 OUTLOOK_TOKEN_URL="https://login.microsoftonline.com/common/oauth2/v2.0/token"
+OUTLOOK_AUTHORIZE_URL="https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+OUTLOOK_REDIRECT_URI="https://login.microsoftonline.com/common/oauth2/nativeclient"
 OUTLOOK_SCOPE="offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read"
 
 # A token is used until it is within this many seconds of expiry.
@@ -84,12 +87,19 @@ _outlook_refresh_unlocked() {
     client_id=$(jq -r '.client_id // empty' "$CONFIG_FILE" 2>/dev/null) || client_id=""
     client_secret=$(jq -r '.client_secret // empty' "$CONFIG_FILE" 2>/dev/null) || client_secret=""
 
+    # A public client (every setup since PKCE) has no secret and must not send
+    # one: Microsoft refuses a secret from a public client. An install set up
+    # before that still has one in config.json, and keeps sending it, so it
+    # keeps working until it is set up again.
+    local secret_arg=()
+    [ -n "$client_secret" ] && secret_arg=(--data-urlencode "client_secret=$client_secret")
+
     now=$(date +%s)
     response=$(curl -sS --fail-with-body --connect-timeout 10 --max-time 60 \
         -X POST "$OUTLOOK_TOKEN_URL" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         --data-urlencode "client_id=$client_id" \
-        --data-urlencode "client_secret=$client_secret" \
+        ${secret_arg[@]+"${secret_arg[@]}"} \
         --data-urlencode "refresh_token=$refresh_token" \
         --data-urlencode "grant_type=refresh_token" \
         --data-urlencode "scope=$OUTLOOK_SCOPE") && rc=0 || rc=$?
@@ -153,6 +163,46 @@ refresh_access_token() {
 ensure_valid_token() {
     outlook_cached_token && return 0
     _outlook_with_token_lock _outlook_refresh_if_stale
+}
+
+# --- Sign-in: PKCE ----------------------------------------------------------------
+# Setup signs in with the authorisation-code flow and PKCE (RFC 7636), as a
+# public client, so there is no client secret to create, store or expire. The
+# verifier stays on this machine; only its SHA-256 goes to the browser, and the
+# code the browser brings back is useless without the verifier.
+
+# outlook_random <length>: that many characters from the set RFC 7636 allows in
+# a verifier (letters, digits and - . _ ~).
+outlook_random() {
+    local want="$1" out
+    out=$(LC_ALL=C tr -dc 'A-Za-z0-9._~-' < /dev/urandom 2>/dev/null | head -c "$want") || true
+    [ "${#out}" -eq "$want" ] || return 1
+    printf '%s\n' "$out"
+}
+
+# A fresh code verifier: 64 characters (RFC 7636 allows 43 to 128).
+outlook_pkce_verifier() {
+    outlook_random 64
+}
+
+# outlook_pkce_challenge <verifier>: BASE64URL(SHA256(verifier)), no padding.
+outlook_pkce_challenge() {
+    printf '%s' "$1" | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '='
+}
+
+# outlook_authorize_url <client_id> <challenge> <state>: the sign-in URL.
+outlook_authorize_url() {
+    local scope redirect
+    scope=$(printf '%s' "$OUTLOOK_SCOPE" | sed 's/ /%20/g')
+    redirect=$(printf '%s' "$OUTLOOK_REDIRECT_URI" | sed 's/:/%3A/g; s#/#%2F#g')
+    printf '%s?client_id=%s&response_type=code&redirect_uri=%s&response_mode=query&scope=%s&code_challenge=%s&code_challenge_method=S256&state=%s&prompt=select_account\n' \
+        "$OUTLOOK_AUTHORIZE_URL" "$1" "$redirect" "$scope" "$2" "$3"
+}
+
+# outlook_url_param <url> <name>: the raw value of one query parameter, or
+# nothing.
+outlook_url_param() {
+    printf '%s' "$1" | tr '?&#' '\n\n\n' | sed -n "s/^$2=//p" | head -1
 }
 
 # --- Requests: timeouts and throttling -------------------------------------------

@@ -19,7 +19,7 @@ collection. Read this section before installing it.
 
 | Host | Purpose |
 |------|---------|
-| `login.microsoftonline.com` | OAuth sign-in (the authorisation-code flow, with the redirect URL pasted back into setup) and token refresh. `az login` also signs in here during setup |
+| `login.microsoftonline.com` | OAuth sign-in (the authorisation-code flow with PKCE, as a public client with no client secret, with the redirect URL pasted back into setup) and token refresh. `az login` also signs in here during setup |
 | `graph.microsoft.com` | Mail, calendar and category operations |
 
 There is no DBHQ server in the path, no proxy and no telemetry. Your mail moves

@@ -167,6 +167,24 @@ eq "refresh runs curl with --fail-with-body" "1" "$(grep -c '^--fail-with-body$'
 eq "refresh runs curl with a --max-time" "1" "$(grep -c '^--max-time$' "$FAKE_CURL_LOG")"
 eq "refresh runs curl with a --connect-timeout" "1" "$(grep -c '^--connect-timeout$' "$FAKE_CURL_LOG")"
 
+# The fixture config is an install from before PKCE: it has a client secret,
+# and must keep sending it, or that install stops working on upgrade.
+eq "an old config with a secret still sends it" "1" "$(grep -c '^client_secret=test-secret$' "$FAKE_CURL_LOG")"
+
+# A public client (every setup since PKCE) has no secret, and the refresh must
+# send no client_secret parameter at all, not even an empty one: Microsoft
+# refuses a secret from a public client.
+cp "$CONFIG_FILE" "$TMP/config.before"
+printf '%s' '{"client_id":"public-client","tenant":"common"}' > "$CONFIG_FILE"
+write_creds 0
+: > "$FAKE_CURL_LOG"
+out=$(FAKE_CURL_MODE=ok refresh_access_token 2>"$TMP/err"); rc=$?
+eq "public client: refresh ok" "0" "$rc"
+eq "public client: refresh stores the new token" "new-access" "$(jq -r .access_token "$CREDS_FILE")"
+eq "public client: the request carries no client_secret" "0" "$(grep -c '^client_secret' "$FAKE_CURL_LOG" || true)"
+eq "public client: the request carries the client_id" "1" "$(grep -c '^client_id=public-client$' "$FAKE_CURL_LOG")"
+cp "$TMP/config.before" "$CONFIG_FILE"
+
 # Microsoft does not always send a new refresh token. The old one must survive,
 # or the next refresh has nothing to send.
 write_creds 0

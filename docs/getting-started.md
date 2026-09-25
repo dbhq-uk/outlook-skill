@@ -8,8 +8,8 @@ the [reference](reference.md).
 
 ## Before you start
 
-You need a Microsoft 365 mailbox you can sign into, and `azure-cli`, `jq` and `curl` on the
-machine. `pandoc` is optional but you want it - without it the markdown commands cannot
+You need a Microsoft 365 mailbox you can sign into, and `azure-cli`, `jq`, `curl` and
+`openssl` on the machine. `pandoc` is optional but you want it - without it the markdown commands cannot
 convert anything, and plain-text email looks it.
 
 ```bash
@@ -40,7 +40,8 @@ normally type the path at all: you ask in plain language and the skill runs the 
 ~/.claude/skills/outlook/scripts/outlook-setup.sh
 ```
 
-It registers an Azure app for you (or reuses one it finds), opens a sign-in, and asks you to
+It registers an Azure app for you (or reuses one it finds) as a public client with no client
+secret, opens a sign-in (the authorisation-code flow with PKCE), and asks you to
 consent to five delegated permissions: `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`,
 `User.Read` and `offline_access`. Those are the whole of what the pack can do. Nothing there
 lets it read anyone else's mailbox, and nothing lets it act while you are not signed in
