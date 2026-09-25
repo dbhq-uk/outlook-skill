@@ -46,12 +46,19 @@ for a in "$@"; do
   case "$a" in https://*) url="$a" ;; -f|-sf) fail=1 ;; esac
   prev="$a"
 done
-case "$data" in @-) data=$(cat) ;; @*) data=$(cat "${data#@}") ;; esac
+n=$(( $(cat "$FAKE_DIR/$method.count" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$FAKE_DIR/$method.count"
+# A body on stdin (an upload chunk) is binary: it is kept byte for byte in
+# $FAKE_DIR/<method>.<n>.body, and its Content-Range is logged.
+if [ "$data" = "@-" ]; then
+  cat > "$FAKE_DIR/$method.$n.body"
+  data=""
+  prev=""; for a in "$@"; do [ "$prev" = "-H" ] && case "$a" in Content-Range:*) printf 'RANGE %s\n' "${a#Content-Range: }" >> "$FAKE_CURL_LOG" ;; esac; prev="$a"; done
+fi
+case "$data" in @*) data=$(cat "${data#@}") ;; esac
 printf '%s %s max-time=%s\n' "$method" "$url" "$maxtime" >> "$FAKE_CURL_LOG"
 [ -n "$data" ] && printf 'BODY %s\n' "$(printf '%s' "$data" | jq -c . 2>/dev/null || printf '%s' "$data")" >> "$FAKE_CURL_LOG"
 
-n=$(( $(cat "$FAKE_DIR/$method.count" 2>/dev/null || echo 0) + 1 ))
-echo "$n" > "$FAKE_DIR/$method.count"
 resp="$FAKE_DIR/$method.$n"
 [ -f "$resp" ] || resp="$FAKE_DIR/$method.default"
 [ -f "$resp" ] || { printf '200\n\n{}' > "$TMP_EMPTY"; resp="$TMP_EMPTY"; }
@@ -225,6 +232,30 @@ respond POST default 200 '{"responses":[{"id":"0","status":201,"body":{}}]}'
 run "$MAIL" batch-move archive "$ID0" "$ID1"
 has "a message with no response in the batch counts as failed" "Done: 1 moved, 1 failed." "$out"
 has "and is named" "FAILED $ID1" "$out"
+
+########################################
+# A large attachment goes up in 4 MB chunks, read with tail and head rather
+# than GNU-only dd flags, so it works on macOS too. The chunks, put back
+# together, are the file.
+########################################
+scenario chunks
+# A draft ID over 100 characters is used as given, with no lookup.
+DRAFT="AAMkAGdraft-$(printf 'd%.0s' $(seq 1 100))"
+BIG="$TMP/big.bin"
+head -c $((9 * 1048576 + 123)) /dev/urandom > "$BIG"
+respond POST default 200 '{"uploadUrl":"https://upload.example.com/session/1"}'
+respond PUT default 200 ''
+run "$MAIL" attach "$DRAFT" "$BIG"
+eq "chunked upload: exits 0" "0" "$rc"
+eq "chunked upload: three PUTs for 9 MB" "3" "$(calls PUT)"
+eq "chunked upload: the ranges cover the file" \
+   "bytes 0-4194303/9437307 bytes 4194304-8388607/9437307 bytes 8388608-9437306/9437307" \
+   "$(sed -n 's/^RANGE //p' "$FAKE_CURL_LOG" | tr '\n' ' ' | sed 's/ $//')"
+cat "$FAKE_DIR"/PUT.1.body "$FAKE_DIR"/PUT.2.body "$FAKE_DIR"/PUT.3.body > "$TMP/rebuilt.bin"
+eq "chunked upload: the chunks put back together are the file" "same" \
+   "$(cmp -s "$BIG" "$TMP/rebuilt.bin" && echo same || echo different)"
+eq "chunked upload: the upload has the long transfer timeout" "3" "$(grep -c '^PUT .* max-time=600$' "$FAKE_CURL_LOG" || true)"
+eq "the script uses no GNU-only dd flags" "0" "$(grep -v '^[[:space:]]*#' "$MAIL" | grep -c 'iflag=' || true)"
 
 ########################################
 # Every curl call has a timeout.

@@ -951,11 +951,13 @@ attach_file_to_draft() {
             bar_empty=$((10 - bar_filled))
             printf "\rUploading: [%s%s] %d%%" "$(printf '#%.0s' $(seq 1 $bar_filled 2>/dev/null) || echo '')" "$(printf ' %.0s' $(seq 1 $bar_empty 2>/dev/null) || echo '')" "$progress"
 
-            # Extract chunk efficiently (using large block size with byte-level positioning)
-            # iflag=skip_bytes,count_bytes makes skip/count work in bytes regardless of bs
+            # Read the chunk with tail and head, which GNU and BSD (macOS) both
+            # support. It was dd with iflag=skip_bytes,count_bytes, which BSD dd
+            # does not have, so a large attachment failed on a Mac. tail -c +N
+            # counts from 1, and seeks rather than reads on a regular file.
             # Not through outlook_curl: the chunk arrives on stdin, so it
             # cannot be sent a second time. It gets the longer transfer timeout.
-            chunk_result=$(dd if="$file_path" bs=1M iflag=skip_bytes,count_bytes skip="$offset" count="$chunk_length" 2>/dev/null | \
+            chunk_result=$(tail -c +"$((offset + 1))" "$file_path" | head -c "$chunk_length" | \
             curl -s --connect-timeout "$OUTLOOK_CONNECT_TIMEOUT" --max-time "$OUTLOOK_TRANSFER_MAX_TIME" \
                 -X PUT "$upload_url" \
                 -H "Content-Type: application/octet-stream" \
