@@ -33,6 +33,20 @@ done
 eq "references/commands.md has no em or en dashes" "0" "$(grep -c $'\xe2\x80\x94\|\xe2\x80\x93' "$COMMANDS" || true)"
 
 ########################################
+# Every skill folder stands alone: no path into another skill's folder.
+########################################
+# npx skills add installs each folder that holds a SKILL.md as a separate
+# skill, and the installers skip a skill whose tools are missing. So the other
+# skill may not be there, and ${CLAUDE_SKILL_DIR}/../<other>/... would point at
+# nothing. Name the other skill instead, and say what to do without it.
+for f in "$SKILLS_ROOT"/*/SKILL.md "$SKILLS_ROOT"/*/references/*.md; do
+    [ -f "$f" ] || continue
+    rel="${f#"$SKILLS_ROOT"/}"
+    hits=$(grep -cE '\$\{?CLAUDE_SKILL_DIR\}?/\.\.' "$f" || true)
+    eq "$rel has no path into another skill's folder" "0" "$hits"
+done
+
+########################################
 # The description says what the skill is for, and what it is not for.
 ########################################
 desc=$(awk '/^---$/ {n++; next} n == 1 && /^description:/ {sub(/^description:[[:space:]]*/, ""); print}' "$SKILL")

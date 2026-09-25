@@ -77,8 +77,10 @@ for src in "$SCRIPT_DIR"/skills/*/; do
   # ${CLAUDE_SKILL_DIR}/.venv/bin/python line resolves to nothing.
   [ -d "$src/.venv" ] && ln -sfn "$src/.venv" "$target/.venv"
 
-  # Rewrite ${CLAUDE_SKILL_DIR} to this skill's Codex path. Cross-skill refs of
-  # the form ${CLAUDE_SKILL_DIR}/../<other> then resolve to a sibling skill.
+  # Rewrite ${CLAUDE_SKILL_DIR} to this skill's Codex path. No SKILL.md reaches
+  # into the other skill's folder (docs_test.sh fails if one does), because a
+  # skill skipped above for a missing tool would leave that path pointing at
+  # nothing. They name each other instead.
   sed "s#\${CLAUDE_SKILL_DIR}#$target#g" \
     "$src/SKILL.md" > "$target/SKILL.md"
 done
