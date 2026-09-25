@@ -513,6 +513,54 @@ recipients_to_json() {
             | map({emailAddress: {address: .}}))'
 }
 
+# parse_new_draft_args <verb> [args...]
+# The arguments of draft and mddraft: <to> <subject> [body], with --cc <list>
+# and --bcc <list> allowed anywhere after the verb. Every list is comma- or
+# semicolon-separated. Sets NEW_DRAFT_SUBJECT, NEW_DRAFT_BODY and
+# NEW_DRAFT_RECIPIENTS, a JSON object of toRecipients plus ccRecipients and
+# bccRecipients when given. Prints usage and returns 1 when the call is wrong.
+parse_new_draft_args() {
+    local verb="$1" to cc="" bcc="" pos=() to_json cc_json bcc_json
+    shift
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --cc|--bcc)
+                if [ $# -lt 2 ]; then
+                    echo "Error: $1 needs a comma- or semicolon-separated list of addresses"
+                    return 1
+                fi
+                if [ "$1" = "--cc" ]; then cc="$2"; else bcc="$2"; fi
+                shift 2 ;;
+            *) pos+=("$1"); shift ;;
+        esac
+    done
+    to="${pos[0]:-}"
+    NEW_DRAFT_SUBJECT="${pos[1]:-}"
+    NEW_DRAFT_BODY="${pos[2]:-}"
+    if [ -z "$to" ] || [ -z "$NEW_DRAFT_SUBJECT" ]; then
+        echo "Usage: outlook-mail.sh $verb <to> <subject> <body> [--cc <emails>] [--bcc <emails>]"
+        echo "       <to>, --cc and --bcc take one address or a comma/semicolon-separated list."
+        return 1
+    fi
+    to_json=$(recipients_to_json "$to")
+    if [ "$(printf '%s' "$to_json" | jq 'length')" -eq 0 ]; then
+        echo "Error: No valid email address in <to>: $to"
+        return 1
+    fi
+    cc_json=$(recipients_to_json "$cc")
+    bcc_json=$(recipients_to_json "$bcc")
+    NEW_DRAFT_RECIPIENTS=$(jq -cn --argjson to "$to_json" --argjson cc "$cc_json" --argjson bcc "$bcc_json" '
+        {toRecipients: $to}
+        + (if ($cc | length) > 0 then {ccRecipients: $cc} else {} end)
+        + (if ($bcc | length) > 0 then {bccRecipients: $bcc} else {} end)')
+}
+
+# The recipient lines a new draft prints, read back from what Graph returned.
+# shellcheck disable=SC2016 # jq program, not shell
+NEW_DRAFT_RECIPIENTS_JQ='
+    def addrs(f): [f[]?.emailAddress.address] | if length == 0 then "(none)" else join(", ") end;
+    "To: \(addrs(.toRecipients))", "Cc: \(addrs(.ccRecipients))", "Bcc: \(addrs(.bccRecipients))"'
+
 # URL-encode a string for safe use as a query-string value (spaces, &, #, :, +,
 # quotes, non-ASCII). Without this, a query like "Q3 & Q4" is silently truncated.
 urlencode() { jq -rn --arg s "$1" '$s|@uri'; }
@@ -1141,34 +1189,21 @@ case "$1" in
         ;;
 
     draft)
-        to="$2"
-        subject="$3"
-        body="$4"
-        if [ -z "$to" ] || [ -z "$subject" ]; then
-            echo "Usage: outlook-mail.sh draft <to-email> <subject> <body>"
-            exit 1
-        fi
+        parse_new_draft_args draft "${@:2}" || exit 1
 
         echo "Creating draft..."
         payload=$(jq -n \
-            --arg to "$to" \
-            --arg subject "$subject" \
-            --arg body "${body:-}" \
+            --arg subject "$NEW_DRAFT_SUBJECT" \
+            --arg body "$NEW_DRAFT_BODY" \
+            --argjson recipients "$NEW_DRAFT_RECIPIENTS" \
             --argjson from "$(draft_from_fragment)" \
             '{
                 subject: $subject,
                 body: {
                     contentType: "Text",
                     content: $body
-                },
-                toRecipients: [
-                    {
-                        emailAddress: {
-                            address: $to
-                        }
-                    }
-                ]
-            } + $from')
+                }
+            } + $recipients + $from')
 
         result=$(api_call POST "/me/messages" "$payload")
         draft_id=$(echo "$result" | jq -r '.id')
@@ -1182,42 +1217,31 @@ case "$1" in
         echo "Draft created!"
         echo "Draft ID: ${draft_id: -20}"
         echo
-        echo "$result" | jq -r '"From: \('"$DRAFT_FROM_JQ"')", "To: \(.toRecipients[0].emailAddress.address)", "Subject: \(.subject)", "Body: \(.body.content)"'
+        echo "$result" | jq -r '"From: \('"$DRAFT_FROM_JQ"')"'
+        echo "$result" | jq -r "$NEW_DRAFT_RECIPIENTS_JQ"
+        echo "$result" | jq -r '"Subject: \(.subject)", "Body: \(.body.content)"'
         ;;
 
     mddraft)
-        to="$2"
-        subject="$3"
-        body="$4"
-        if [ -z "$to" ] || [ -z "$subject" ]; then
-            echo "Usage: outlook-mail.sh mddraft <to-email> <subject> <markdown-body>"
-            exit 1
-        fi
+        parse_new_draft_args mddraft "${@:2}" || exit 1
 
         require_pandoc
 
         echo "Creating markdown draft..."
-        html_body=$(md_to_html "${body:-}")
+        html_body=$(md_to_html "$NEW_DRAFT_BODY")
 
         payload=$(jq -n \
-            --arg to "$to" \
-            --arg subject "$subject" \
+            --arg subject "$NEW_DRAFT_SUBJECT" \
             --arg body "$html_body" \
+            --argjson recipients "$NEW_DRAFT_RECIPIENTS" \
             --argjson from "$(draft_from_fragment)" \
             '{
                 subject: $subject,
                 body: {
                     contentType: "HTML",
                     content: $body
-                },
-                toRecipients: [
-                    {
-                        emailAddress: {
-                            address: $to
-                        }
-                    }
-                ]
-            } + $from')
+                }
+            } + $recipients + $from')
 
         result=$(api_call POST "/me/messages" "$payload")
         draft_id=$(echo "$result" | jq -r '.id')
@@ -1231,7 +1255,9 @@ case "$1" in
         echo "Draft created (HTML from Markdown)!"
         echo "Draft ID: ${draft_id: -20}"
         echo
-        echo "$result" | jq -r '"From: \('"$DRAFT_FROM_JQ"')", "To: \(.toRecipients[0].emailAddress.address)", "Subject: \(.subject)"'
+        echo "$result" | jq -r '"From: \('"$DRAFT_FROM_JQ"')"'
+        echo "$result" | jq -r "$NEW_DRAFT_RECIPIENTS_JQ"
+        echo "$result" | jq -r '"Subject: \(.subject)"'
         ;;
 
     reply)
@@ -2860,6 +2886,8 @@ ${existing_body}"
         echo "Sending:"
         echo "  draft <to> <subject> <body>    Create plain text draft"
         echo "  mddraft <to> <subject> <body>  Create draft with markdown formatting"
+        echo "                             Both take --cc <emails> and --bcc <emails>; <to>,"
+        echo "                             --cc and --bcc are comma/semicolon-separated lists"
         echo "  reply <id> <body>              Create reply draft (plain text)"
         echo "  mdreply <id> <body>            Create reply draft with markdown formatting"
         echo "  forward <id> <to> [comment]    Create forward draft (markdown comment optional)"

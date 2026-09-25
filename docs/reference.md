@@ -61,8 +61,8 @@ mail.sh search 'from:acme.com AND body:renewal' all
 
 | Command | Notes |
 |---|---|
-| `draft <to> <subject> <body>` | Plain text |
-| `mddraft <to> <subject> <markdown>` | Markdown to HTML. Needs `pandoc` |
+| `draft <to> <subject> <body> [--cc <emails>] [--bcc <emails>]` | Plain text |
+| `mddraft <to> <subject> <markdown> [--cc <emails>] [--bcc <emails>]` | Markdown to HTML. Needs `pandoc` |
 | `reply <id> <body>` | **Reply-all.** Plain text |
 | `mdreply <id> <markdown>` | **Reply-all.** Markdown. Prefer this |
 | `forward <id> <to-emails> [markdown-comment]` | Quoted message and its attachments |

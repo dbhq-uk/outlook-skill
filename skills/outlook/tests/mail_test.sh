@@ -13,7 +13,8 @@
 # the attachments before it posts, and posts nothing if it cannot read them.
 # `delete` and `rmdir` move to Deleted Items and never send a DELETE.
 # `attach --inline` and `signature` upload inline images, and `update mdbody`
-# keeps a signature block.
+# keeps a signature block. `draft` and `mddraft` take recipient lists and
+# --cc/--bcc.
 set -u
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,6 +52,7 @@ case "$data" in @*) data=$(cat "${data#@}") ;; esac
 path="${url#https://graph.microsoft.com/v1.0}"
 case "$method $path" in
   "GET /me?"*)              printf '%s' '{"mail":"dan@example.com","proxyAddresses":["SMTP:dan@example.com","smtp:alias@example.com"]}' ;;
+  "POST /me/messages")      printf '%s' "$data" | jq -c '. + {id: "NEWDRAFTxxxxxxxxxxxxxxxxxxxxxx"}' ;;
   "POST "*/createReplyAll)  cat "$FAKE_DRAFT" ;;
   "POST "*/createForward)   cat "$FAKE_DRAFT" ;;
   "PATCH /me/messages/"*)
@@ -198,6 +200,41 @@ has "rmdir says where the folder went" "Moved folder 'Old Projects' to Deleted I
 out=$(mail "" rmdir "Old Projects"); rc=$?
 eq "rmdir of an empty folder needs no --force" "1" "$(grep -c '^POST .*/mailFolders/FOLDER1/move$' "$FAKE_CURL_LOG")"
 eq "rmdir of an empty folder sends no DELETE" "0" "$(grep -c '^DELETE ' "$FAKE_CURL_LOG" || true)"
+
+########################################
+# draft and mddraft: recipient lists, --cc and --bcc
+########################################
+new_draft() {  # the JSON body of the POST that created the draft
+    grep -A1 '^POST https://graph.microsoft.com/v1.0/me/messages$' "$FAKE_CURL_LOG" | sed -n 's/^BODY //p'
+}
+addrs() { new_draft | jq -r "[.$1[]?.emailAddress.address] | join(\",\")"; }
+
+out=$(mail "" draft "a@example.com; b@example.com" "Hi" "Body"); rc=$?
+eq "draft with two addresses exits 0" "0" "$rc"
+eq "draft splits a semicolon list into two To recipients" "a@example.com,b@example.com" "$(addrs toRecipients)"
+eq "draft without --cc sends no Cc" "false" "$(new_draft | jq 'has("ccRecipients")')"
+has "draft prints every To recipient" "To: a@example.com, b@example.com" "$out"
+has "draft prints an empty Cc as (none)" "Cc: (none)" "$out"
+
+out=$(mail "" draft "a@example.com, b@example.com" "Hi" "Body" --cc "c@example.com;d@example.com" --bcc "audit@example.com")
+eq "draft splits a comma list too" "a@example.com,b@example.com" "$(addrs toRecipients)"
+eq "draft --cc sets Cc" "c@example.com,d@example.com" "$(addrs ccRecipients)"
+eq "draft --bcc sets Bcc" "audit@example.com" "$(addrs bccRecipients)"
+eq "the options never land in the body or subject" "Hi|Body" "$(new_draft | jq -r '"\(.subject)|\(.body.content)"')"
+has "draft prints Cc" "Cc: c@example.com, d@example.com" "$out"
+has "draft prints Bcc" "Bcc: audit@example.com" "$out"
+
+out=$(mail "" mddraft --cc "c@example.com" "a@example.com;b@example.com" "Hi" "**Body**")
+eq "mddraft splits a list into two To recipients" "a@example.com,b@example.com" "$(addrs toRecipients)"
+eq "mddraft --cc before the arguments works" "c@example.com" "$(addrs ccRecipients)"
+has "mddraft still converts the markdown" "<strong>Body</strong>" "$(new_draft | jq -r '.body.content')"
+
+out=$(mail "" draft " ; , " "Hi" "Body"); rc=$?
+eq "a To list with no address is refused" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
+eq "a refused draft creates nothing" "" "$(new_draft)"
+out=$(mail "" draft "a@example.com" "Hi" "Body" --cc); rc=$?
+eq "--cc with no list is refused" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
+eq "--cc with no list creates nothing" "" "$(new_draft)"
 
 ########################################
 # attach --inline and signature
