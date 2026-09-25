@@ -14,7 +14,10 @@
 # `delete` and `rmdir` move to Deleted Items and never send a DELETE.
 # `attach --inline` and `signature` upload inline images, and `update mdbody`
 # keeps a signature block. `draft` and `mddraft` take recipient lists and
-# --cc/--bcc.
+# --cc/--bcc. reply, mdreply and followup create a reply-all draft and print
+# every To, Cc and Bcc. The reply verbs put the chain marker between the new
+# text and the quoted history, and `update mdbody` keeps everything from the
+# first marker onwards.
 set -u
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -338,6 +341,99 @@ out=$(mail "" signature "$DRAFT_ID" "$IMG/broken.html"); rc=$?
 eq "a missing image makes signature exit non-zero" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
 has "a missing image is named" "missing.png" "$out"
 eq "a missing image uploads and changes nothing" "0" "$(grep -c '^\(POST\|PATCH\) ' "$FAKE_CURL_LOG" || true)"
+
+########################################
+# Reply-all: every reply verb keeps all the recipients and prints them all
+########################################
+# The printed To and Cc lines are how the user checks who a reply goes to
+# before it is sent. A sender-only reply would drop the Cc line silently.
+printf '{"id":"%s","subject":"RE: Plans","isDraft":true,"body":{"contentType":"HTML","content":"<p>QUOTED HISTORY</p>"},"toRecipients":[{"emailAddress":{"address":"alice@example.com"}},{"emailAddress":{"address":"bob@example.com"}}],"ccRecipients":[{"emailAddress":{"address":"carol@example.com"}},{"emailAddress":{"address":"dave@example.com"}}],"bccRecipients":[{"emailAddress":{"address":"audit@example.com"}}],"from":null}' \
+    "$DRAFT_ID" > "$FAKE_DRAFT"
+reply_all_posts() { grep -c "^POST https://graph.microsoft.com/v1.0/me/messages/$MSG_ID/createReplyAll\$" "$FAKE_CURL_LOG" || true; }
+sender_only_posts() { grep -c '/createReply$' "$FAKE_CURL_LOG" || true; }
+
+reply_verbs="reply"
+command -v pandoc >/dev/null 2>&1 && reply_verbs="reply mdreply followup"
+for verb in $reply_verbs; do
+    out=$(mail "" "$verb" "$MSG_ID" "Thanks")
+    eq "$verb creates a reply-all draft" "1" "$(reply_all_posts)"
+    eq "$verb never creates a sender-only reply" "0" "$(sender_only_posts)"
+    has "$verb prints every To recipient" "To:      alice@example.com, bob@example.com" "$out"
+    has "$verb prints every Cc recipient" "Cc:      carol@example.com, dave@example.com" "$out"
+    has "$verb prints the Bcc" "Bcc:     audit@example.com" "$out"
+done
+command -v pandoc >/dev/null 2>&1 || echo "skip - mdreply/followup reply-all tests (pandoc not installed)"
+
+# No Cc on the original: no Cc line, rather than an empty one.
+jq '.ccRecipients = [] | .bccRecipients = []' "$FAKE_DRAFT" > "$TMP/no_cc.json" && mv "$TMP/no_cc.json" "$FAKE_DRAFT"
+out=$(mail "" reply "$MSG_ID" "Thanks")
+eq "reply prints no Cc line when there is no Cc" "0" "$(printf '%s\n' "$out" | grep -c '^Cc:' || true)"
+has "reply still prints both To recipients" "To:      alice@example.com, bob@example.com" "$out"
+
+########################################
+# The chain marker that update mdbody relies on
+########################################
+# mdreply, followup and forward put an empty span between the new message and
+# the quoted history. update mdbody keeps everything from that span onwards.
+# Whether Exchange keeps the span in a saved draft is not something a fixture
+# can answer: tests/chain_marker_live.sh asks the real server.
+if command -v pandoc >/dev/null 2>&1; then
+    # The body of the last PATCH to the draft, on one line.
+    last_patch_body() {
+        grep -A1 "^PATCH https://graph.microsoft.com/v1.0/me/messages/$DRAFT_ID\$" "$FAKE_CURL_LOG" \
+            | sed -n 's/^BODY //p' | tail -1 | jq -j '.body.content' | tr '\n' ' '
+    }
+    # 1 when the three strings appear in this order in $1.
+    in_order() {
+        printf '%s' "$1" | awk -v a="$2" -v b="$3" -v c="$4" \
+            '{x=index($0,a); y=index($0,b); z=index($0,c)} END{print (x && y && z && x < y && y < z) ? 1 : 0}'
+    }
+
+    for verb in mdreply followup; do
+        out=$(mail "" "$verb" "$MSG_ID" "New **text**")
+        eq "$verb puts the marker between the new text and the quoted history" "1" \
+           "$(in_order "$(last_patch_body)" "<strong>text</strong>" "$CHAIN" "QUOTED HISTORY")"
+    done
+    out=$(mail "" forward "$MSG_ID" "bob@example.com" "New **text**")
+    eq "forward with a comment puts the marker between the comment and the message" "1" \
+       "$(in_order "$(last_patch_body)" "<strong>text</strong>" "$CHAIN" "QUOTED HISTORY")"
+
+    # update mdbody on a reply draft: the new text replaces the old, and the
+    # chain is kept byte for byte from the marker onwards.
+    chain_draft="<p>OLD TEXT</p><br/>${CHAIN}<div><p>QUOTED HISTORY</p></div>"
+    jq -n --arg id "$DRAFT_ID" --arg b "$chain_draft" '{id: $id, body: {contentType: "html", content: $b}}' > "$FAKE_DRAFT_READ"
+    out=$(mail "" update "$DRAFT_ID" mdbody "Rewritten **reply**"); rc=$?
+    new=$(last_patch_body)
+    eq "update mdbody on a reply exits 0" "0" "$rc"
+    eq "update mdbody reads the draft body before it writes" "1" \
+       "$(awk -v d="$DRAFT_ID" '$0 ~ "^GET .*/me/messages/"d"\\?\\$select=body$" {g=NR} $0 ~ "^PATCH .*/me/messages/"d"$" {p=NR} END{print (g && p && g < p) ? 1 : 0}' "$FAKE_CURL_LOG")"
+    eq "update mdbody drops the old text" "gone" "$([ "${new#*OLD TEXT}" = "$new" ] && echo gone || echo kept)"
+    eq "update mdbody keeps the chain from the marker onwards" "${CHAIN}<div><p>QUOTED HISTORY</p></div>" "${CHAIN}${new#*"$CHAIN"}"
+    eq "update mdbody puts the new text before the chain" "1" "$(in_order "$new" "<strong>reply</strong>" "$CHAIN" "QUOTED HISTORY")"
+
+    # A reply to a reply: the quoted history holds an earlier marker of its
+    # own. The split is on the FIRST marker, so none of the history is lost.
+    nested="<p>OLD TEXT</p><br/>${CHAIN}<p>THEIR REPLY</p><br/>${CHAIN}<p>MY FIRST MESSAGE</p>"
+    jq -n --arg id "$DRAFT_ID" --arg b "$nested" '{id: $id, body: {contentType: "html", content: $b}}' > "$FAKE_DRAFT_READ"
+    out=$(mail "" update "$DRAFT_ID" mdbody "Rewritten")
+    new=$(last_patch_body)
+    has "update mdbody splits on the first marker and keeps the whole history" \
+        "${CHAIN}<p>THEIR REPLY</p><br/>${CHAIN}<p>MY FIRST MESSAGE</p>" "$new"
+    eq "update mdbody on a reply to a reply drops only the new text" "gone" \
+       "$([ "${new#*OLD TEXT}" = "$new" ] && echo gone || echo kept)"
+
+    # No marker: the whole body is replaced. This is what would happen to
+    # every reply if Exchange stripped the marker on save, and why the live
+    # check exists.
+    jq -n --arg id "$DRAFT_ID" '{id: $id, body: {contentType: "html", content: "<p>OLD TEXT</p><p>UNMARKED HISTORY</p>"}}' > "$FAKE_DRAFT_READ"
+    out=$(mail "" update "$DRAFT_ID" mdbody "Rewritten")
+    new=$(last_patch_body)
+    eq "update mdbody with no marker replaces the whole body" "gone" \
+       "$([ "${new#*UNMARKED HISTORY}" = "$new" ] && echo gone || echo kept)"
+    eq "update mdbody with no marker adds no marker" "0" "$(printf '%s' "$new" | grep -c 'data-mdreply-chain-start' || true)"
+else
+    echo "skip - chain marker tests (pandoc not installed)"
+fi
 
 echo "-----------------------------"
 printf 'PASS=%d FAIL=%d\n' "$PASS" "$FAIL"

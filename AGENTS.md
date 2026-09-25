@@ -56,7 +56,8 @@ shellcheck skills/outlook/scripts/*.sh # lint (warnings should be clean)
 bash skills/outlook/tests/helpers_test.sh  # offline unit tests (no account needed)
 bash skills/outlook/tests/token_test.sh    # token refresh against a fake curl
 bash skills/outlook/tests/calendar_test.sh # calendar verbs against a fake curl
-bash skills/outlook/tests/mail_test.sh     # draft From and send summary against a fake curl
+bash skills/outlook/tests/mail_test.sh     # draft From, send summary, reply-all and the chain marker, against a fake curl
+bash skills/outlook/tests/chain_marker_test.sh # the live chain marker check, against a fake Exchange
 bash skills/outlook/tests/graph_test.sh    # timeouts, 429/503 retries and batch-move failures
 bash skills/outlook/tests/setup_test.sh    # setup: public client, PKCE, no secret, the old-secret path
 bash skills/outlook/tests/docs_test.sh     # SKILL.md word limit and dashes; every verb documented
@@ -73,3 +74,19 @@ mocked Graph API, so it catches regressions without a live mailbox.
 against a fake `curl` and a throwaway `HOME`, so it never touches real
 credentials. Anything that needs real Graph calls (actual search results) still
 wants a manual smoke test against a configured account.
+
+One such question has its own script. `update mdbody` keeps a reply's quoted
+history by finding an empty `<span data-mdreply-chain-start="1"></span>` in the
+draft, so it depends on Exchange keeping that span when it saves a draft. Run
+this against a configured account after a change to the marker or to
+`update mdbody`, or if a reply ever loses its history:
+
+```bash
+bash skills/outlook/tests/chain_marker_live.sh [--account <name>]
+```
+
+It creates a draft with no recipients, writes the marker as `mdreply` does,
+runs the real `update mdbody`, reads the body back after each step, and moves
+the draft to Deleted Items. It sends nothing. Exit 0 means the history is safe;
+exit 1 names the step that lost it. CI does not run it, because it needs a
+real mailbox.
