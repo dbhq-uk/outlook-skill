@@ -47,7 +47,7 @@ ${CLAUDE_SKILL_DIR}/.venv/bin/python ${CLAUDE_SKILL_DIR}/scripts/outlook_to_md.p
 # Include deleted items
 ${CLAUDE_SKILL_DIR}/.venv/bin/python ${CLAUDE_SKILL_DIR}/scripts/outlook_to_md.py /path/to/file.pst /path/to/output/ --include-deleted --verbose
 
-# Set timezone for date display
+# Render every date in one zone (default: the offset each message was sent with)
 ${CLAUDE_SKILL_DIR}/.venv/bin/python ${CLAUDE_SKILL_DIR}/scripts/outlook_to_md.py /path/to/file.pst /path/to/output/ --timezone "Europe/London"
 
 # Fix MAILER-DAEMON sent items (provide the PST owner's email)
@@ -141,7 +141,7 @@ outlook_to_md.py [-h] [--include-deleted] [--timezone TZ] [--verbose] [--append]
 | `pst_file` | Path to PST file, or directory of pre-extracted .eml files |
 | `output_dir` | Output directory (created if needed) |
 | `--include-deleted` | Include deleted items from PST (passes `-D` to readpst) |
-| `--timezone TZ` | Target timezone for dates (default: UTC) |
+| `--timezone TZ` | Render every date in this IANA zone, e.g. `Europe/London`. An unknown name is refused. Default: the offset each message was sent with |
 | `--verbose`, `-v` | Verbose output with per-email logging |
 | `--append` | Skip emails already in archive (by Message-ID) |
 | `--owner-email EMAIL` | PST owner's email (fixes MAILER-DAEMON in sent items) |

@@ -57,16 +57,17 @@ session that only triages. [The send gap](docs/architecture.md#the-send-gap) say
 layer covers and what it does not.
 
 **Time-aware.** It anchors "today", "tomorrow" and "by EOD" against the real clock and tracks
-BST against UTC, so scheduled sends and deadline arithmetic are correct. Calendar times are
-wall-clock in a timezone it tells you about rather than assumes.
+BST against UTC, so deadline arithmetic is correct. Calendar times are wall-clock in a
+timezone it tells you about rather than assumes.
 
 **Professional formatting.** Markdown drafts convert to clean HTML with the Microsoft 365
 Aptos font stack and inline styles - including per-paragraph margins - that survive Outlook's
 rendering.
 
 **It asks for five permissions and no more.** `Mail.ReadWrite`, `Mail.Send`,
-`Calendars.ReadWrite`, `User.Read`, `offline_access`, all delegated. Nothing tenant-wide,
-nothing that can reach another mailbox, and no admin consent to obtain.
+`Calendars.ReadWrite`, `User.Read`, `offline_access`, all delegated. Nothing tenant-wide and
+nothing that can reach another mailbox. Whether you can consent to them yourself depends on your
+tenant: many organisations let users approve these, and many require an admin to.
 
 ## What it covers
 
