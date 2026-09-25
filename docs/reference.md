@@ -139,9 +139,9 @@ exists.
 
 | Command | Notes |
 |---|---|
-| `events [count]` | Upcoming, default 10 |
+| `events [count]` | The next `count` events (default 10) in the coming year. Each occurrence of a recurring meeting is its own row |
 | `today` | |
-| `week` | |
+| `week` | Today and the next seven days |
 | `day <YYYY-MM-DD>` | |
 | `search <text> [days]` | Subject and location, default next 90 days |
 | `read <id>` | Details, including attendees and responses |
@@ -154,6 +154,15 @@ exists.
 | `cancel <id> [comment]` | Withdraws a meeting you organise and tells attendees |
 | `delete <id>` | Removes the event silently |
 | `free <start> <end>` | Free, or what is in the way |
+
+Every listing prints each event's short ID (the last 20 characters) and caches the full IDs,
+so `read`, `update`, `respond`, `cancel`, `delete` and `invite` take the ID straight off the
+screen. Listings page through Graph's results rather than stopping at its default of 10. A
+short ID that is not in the last listing is looked up from 30 days back to a year ahead, which
+finds a single occurrence of a recurring meeting. Two events whose IDs end the same way are
+printed with their full IDs, and the short form is refused rather than guessed.
+
+`free` ignores events shown as free and events that have been cancelled.
 
 Graph rejects a `start` later than the current `end` and an `end` earlier than the current
 `start`, so moving an event to another day means updating the safe bound first.
@@ -260,6 +269,7 @@ thousand messages takes five to fifteen minutes.
 | `~/.dbhq/outlook/<account>/config.json` | Client ID, secret, tenant, redirect URI, scopes (`600`) |
 | `~/.dbhq/outlook/<account>/credentials.json` | Access and refresh tokens (`600`) |
 | `~/.dbhq/outlook/<account>/id_cache.json` | Short ID to full Graph ID |
+| `~/.dbhq/outlook/<account>/event_id_cache.json` | Full IDs of the events the last calendar listing printed |
 | `~/.dbhq/outlook/<account>/.token.lock` | Empty. Held during a token refresh so two commands do not refresh at once |
 
 A pre-multi-account install with flat `~/.dbhq/outlook/*.json` files is migrated into

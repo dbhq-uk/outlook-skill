@@ -105,22 +105,41 @@ else
 fi
 
 ########################################
-# resolve_event_id: passthrough, upcoming hit, past fallback, miss
+# resolve_event_id: passthrough, the last listing's cache, an occurrence found
+# through calendarView, a past event, a miss, and a clash. A recurring series is
+# one item in /me/events but several occurrences in calendarView, each with its
+# own ID, so an occurrence's short ID must resolve through calendarView.
 ########################################
+eval "$(extract_cal_fn local_iso)"
+eval "$(extract_cal_fn local_date)"
+eval "$(extract_cal_fn day_start)"
+eval "$(extract_cal_fn day_end)"
+eval "$(extract_cal_fn calendar_view)"
+DEFAULT_TIMEZONE="Europe/London"
+CALENDAR_VIEW_MAX=1000
+EVENT_SELECT="id,subject,start,end,location,showAs,isCancelled,type"
+EVENT_ID_CACHE_FILE=$(mktemp)
+echo '[]' > "$EVENT_ID_CACHE_FILE"
 api_call() {
     local endpoint="$2"
     case "$endpoint" in
-      "/me/calendar/events?"*) echo '{"value":[{"id":"AAAAlongupcomingevent111"},{"id":"AAAAlongupcomingevent222"}]}';;
-      "/me/events?"*)          echo '{"value":[{"id":"BBBBlongpasteventXYZ99999"}]}';;
+      "/me/calendar/calendarView?"*) echo '{"value":[{"id":"OCCURRENCEaaaaaaaaaaaaaaaa0901"},{"id":"OCCURRENCEaaaaaaaaaaaaaaaa0908"},{"id":"SINGLEupcomingevent222"},{"id":"ONExxxxSHAREDTAIL0000"},{"id":"TWOxxxxSHAREDTAIL0000"}]}';;
+      "/me/events?"*)                echo '{"value":[{"id":"BBBBlongpasteventXYZ99999"}]}';;
       *) echo '{"value":[]}';;
     esac
 }
-today_start() { echo "2026-01-01T00:00:00Z"; }
 LONG_ID="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 eq "event long id passthrough" "$LONG_ID" "$(resolve_event_id "$LONG_ID")"
-eq "event short id upcoming"   "AAAAlongupcomingevent222" "$(resolve_event_id 'event222')"
-eq "event short id past fallback" "BBBBlongpasteventXYZ99999" "$(resolve_event_id 'XYZ99999')"
-eq "event id miss -> rc1" "1" "$(resolve_event_id 'nomatch' >/dev/null; echo $?)"
+eq "event short id: occurrence via calendarView" "OCCURRENCEaaaaaaaaaaaaaaaa0908" "$(resolve_event_id 'aaaaaaaa0908')"
+eq "event short id: single upcoming event"       "SINGLEupcomingevent222" "$(resolve_event_id 'event222')"
+eq "event short id: past fallback"               "BBBBlongpasteventXYZ99999" "$(resolve_event_id 'XYZ99999')"
+eq "event id miss -> rc1" "1" "$(resolve_event_id 'nomatch' 2>/dev/null >/dev/null; echo $?)"
+eq "event id clash -> rc1, not a guess" "1" "$(resolve_event_id 'SHAREDTAIL0000' 2>/dev/null >/dev/null; echo $?)"
+eq "event id clash says so" "1" "$(resolve_event_id 'SHAREDTAIL0000' 2>&1 >/dev/null | grep -c 'Use the full ID')"
+echo '["CACHEDlistingeventABC123"]' > "$EVENT_ID_CACHE_FILE"
+api_call() { echo "api_call should not run" >&2; echo '{"value":[]}'; }
+eq "event short id: last listing's cache, no search" "CACHEDlistingeventABC123" "$(resolve_event_id 'eventABC123' 2>&1)"
+rm -f "$EVENT_ID_CACHE_FILE"
 
 ########################################
 # urlencode

@@ -93,6 +93,7 @@ message is now.
 | `~/.dbhq/outlook/<account>/config.json` | Azure app client ID and secret, tenant, scopes |
 | `~/.dbhq/outlook/<account>/credentials.json` | OAuth access and refresh tokens |
 | `~/.dbhq/outlook/<account>/id_cache.json` | Short ID to full Graph ID mapping |
+| `~/.dbhq/outlook/<account>/event_id_cache.json` | Full event IDs from the last calendar listing |
 | `~/.dbhq/outlook/<account>/.token.lock` | Empty lock file, held while a token refreshes |
 
 The account directory is `700` and both credential files `600`, in your home directory and

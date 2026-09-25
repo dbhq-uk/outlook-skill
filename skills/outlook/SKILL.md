@@ -397,6 +397,9 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh stats
 ### Viewing Calendar
 
 ```bash
+# Every listing prints each event's short ID, which read/respond/cancel/update/
+# delete/invite accept. Recurring meetings appear once per occurrence.
+
 # Upcoming events (default 10)
 ${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh events
 
