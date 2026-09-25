@@ -281,7 +281,8 @@ echo
 echo "Exchanging code for tokens..."
 
 NOW=$(date +%s)
-TOKEN_RESPONSE=$(curl -s -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
+TOKEN_RESPONSE=$(curl -s --connect-timeout 10 --max-time 60 \
+    -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "client_id=$CLIENT_ID" \
     -d "client_secret=$CLIENT_SECRET" \
@@ -311,7 +312,8 @@ echo -e "${BLUE}Step 7/7: Testing Connection${NC}"
 
 ACCESS_TOKEN=$(jq -r '.access_token' "$CREDS_FILE")
 
-TEST_RESPONSE=$(curl -s -X GET "https://graph.microsoft.com/v1.0/me/mailFolders/inbox" \
+TEST_RESPONSE=$(curl -s --connect-timeout 10 --max-time 60 \
+    -X GET "https://graph.microsoft.com/v1.0/me/mailFolders/inbox" \
     -H "Authorization: Bearer $ACCESS_TOKEN")
 
 if echo "$TEST_RESPONSE" | jq -e '.error' > /dev/null 2>&1; then

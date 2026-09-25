@@ -92,20 +92,21 @@ if ! ACCESS_TOKEN=$(ensure_valid_token) || [ -z "$ACCESS_TOKEN" ]; then
     exit 1
 fi
 
-# Low-level Graph request using the current $ACCESS_TOKEN.
+# Low-level Graph request using the current $ACCESS_TOKEN. outlook_curl (in
+# lib/graph.sh) adds the timeouts and retries a throttled request.
 _graph_request() {
     local method="$1"
     local endpoint="$2"
     local data="$3"
 
     if [ -n "$data" ]; then
-        curl -s -X "$method" "${GRAPH_URL}${endpoint}" \
+        outlook_curl "$method" -X "$method" "${GRAPH_URL}${endpoint}" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$data"
     else
         # Content-Length: 0 required for POST requests with no body
-        curl -s -X "$method" "${GRAPH_URL}${endpoint}" \
+        outlook_curl "$method" -X "$method" "${GRAPH_URL}${endpoint}" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Length: 0"
     fi
@@ -120,7 +121,7 @@ _graph_request_file() {
     local endpoint="$2"
     local body_file="$3"
 
-    curl -s -X "$method" "${GRAPH_URL}${endpoint}" \
+    outlook_curl "$method" -X "$method" "${GRAPH_URL}${endpoint}" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Content-Type: application/json" \
         --data-binary @"$body_file"
@@ -952,8 +953,11 @@ attach_file_to_draft() {
 
             # Extract chunk efficiently (using large block size with byte-level positioning)
             # iflag=skip_bytes,count_bytes makes skip/count work in bytes regardless of bs
+            # Not through outlook_curl: the chunk arrives on stdin, so it
+            # cannot be sent a second time. It gets the longer transfer timeout.
             chunk_result=$(dd if="$file_path" bs=1M iflag=skip_bytes,count_bytes skip="$offset" count="$chunk_length" 2>/dev/null | \
-            curl -s -X PUT "$upload_url" \
+            curl -s --connect-timeout "$OUTLOOK_CONNECT_TIMEOUT" --max-time "$OUTLOOK_TRANSFER_MAX_TIME" \
+                -X PUT "$upload_url" \
                 -H "Content-Type: application/octet-stream" \
                 -H "Content-Length: $chunk_length" \
                 -H "Content-Range: bytes ${offset}-${chunk_end}/${file_size}" \
@@ -2312,18 +2316,22 @@ ${existing_body}"
         # Listings print SHORT (20-char) IDs, so resolve each to its full ID.
         # The resolver is cache-first, and every listing command populates the
         # cache, so the common list-then-move flow costs no extra API calls.
+        # `given` keeps the ID as the user wrote it, so a failure can name it.
         resolved=()
+        given=()
         skipped=0
         for id in "${ids[@]}"; do
             if [ ${#id} -le 25 ]; then
                 if full=$(resolve_message_id "$id" "messages"); then
                     resolved+=("$full")
+                    given+=("$id")
                 else
                     echo "  WARNING: could not resolve short ID '$id' - skipped"
                     skipped=$((skipped + 1))
                 fi
             else
                 resolved+=("$id")
+                given+=("$id")
             fi
         done
         ids=("${resolved[@]}")
@@ -2345,26 +2353,76 @@ ${existing_body}"
         failed=0
         i=0
         while [ $i -lt "$total" ]; do
-            # Build a batch of up to 20 move sub-requests
-            requests="[]"
-            n=0
-            while [ $n -lt 20 ] && [ $i -lt "$total" ]; do
-                requests=$(echo "$requests" | jq \
-                    --arg rid "$n" --arg mid "${ids[$i]}" --arg dest "$dest_folder_id" \
-                    '. += [{id: $rid, method: "POST", url: ("/me/messages/" + $mid + "/move"), headers: {"Content-Type": "application/json"}, body: {destinationId: $dest}}]')
-                n=$((n + 1))
+            # Up to 20 messages per batch. Each sub-request's id is the
+            # message's index in $ids, so a response maps straight back to it.
+            pending=()
+            while [ ${#pending[@]} -lt 20 ] && [ $i -lt "$total" ]; do
+                pending+=("$i")
                 i=$((i + 1))
             done
-            body=$(jq -n --argjson reqs "$requests" '{requests: $reqs}')
-            resp=$(api_call POST "/\$batch" "$body")
 
-            ok=$(echo "$resp" | jq '[.responses[]? | select(.status >= 200 and .status < 300)] | length' 2>/dev/null || echo 0)
-            bad=$(echo "$resp" | jq '[.responses[]? | select(.status >= 300)] | length' 2>/dev/null || echo 0)
-            moved=$((moved + ${ok:-0}))
-            failed=$((failed + ${bad:-0}))
+            # A batch goes out once, then again for any messages Graph
+            # throttled (429), after their Retry-After, up to
+            # OUTLOOK_MAX_RETRIES times.
+            round=0
+            while [ ${#pending[@]} -gt 0 ]; do
+                requests=$(for idx in "${pending[@]}"; do printf '%s\t%s\n' "$idx" "${ids[$idx]}"; done \
+                    | jq -Rn --arg dest "$dest_folder_id" \
+                        '[inputs | split("\t") | {id: .[0], method: "POST", url: ("/me/messages/" + .[1] + "/move"), headers: {"Content-Type": "application/json"}, body: {destinationId: $dest}}]')
+                body=$(jq -n --argjson reqs "$requests" '{requests: $reqs}')
+                resp=$(api_call POST "/\$batch" "$body")
 
-            # Surface any per-message failures
-            echo "$resp" | jq -r '.responses[]? | select(.status >= 300) | "  FAILED [\(.status)] \(.body.error.message // "unknown error")"' 2>/dev/null || true
+                # No .responses array means the batch itself failed (an error,
+                # a network failure, a body that is not JSON). Graph moved
+                # none of it that we can prove, so every message in it failed.
+                if ! printf '%s' "$resp" | jq -e 'objects | .responses | arrays' > /dev/null 2>&1; then
+                    err=$(printf '%s' "$resp" | jq -r '.error.message // .error.code // empty' 2>/dev/null) || err=""
+                    [ -n "$err" ] || err="no usable response from Microsoft Graph"
+                    echo "  ERROR: the whole batch of ${#pending[@]} failed: $err"
+                    for idx in "${pending[@]}"; do
+                        echo "  FAILED ${given[$idx]}: $err"
+                    done
+                    failed=$((failed + ${#pending[@]}))
+                    break
+                fi
+
+                ok=$(printf '%s' "$resp" | jq '[.responses[] | select(.status >= 200 and .status < 300)] | length')
+                moved=$((moved + ok))
+
+                # A sub-request with no response at all is a failure too.
+                throttled=()
+                wait_for=0
+                for idx in "${pending[@]}"; do
+                    item=$(printf '%s' "$resp" | jq -c --arg id "$idx" 'first(.responses[] | select((.id | tostring) == $id)) // empty')
+                    status=$(printf '%s' "$item" | jq -r '.status // 0' 2>/dev/null) || status=0
+                    [ -n "$status" ] || status=0
+                    if [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
+                        continue
+                    fi
+                    if [ "$status" -eq 429 ] && [ "$round" -lt "$OUTLOOK_MAX_RETRIES" ]; then
+                        throttled+=("$idx")
+                        after=$(printf '%s' "$item" | jq -r '(.headers // {}) | to_entries[] | select(.key | ascii_downcase == "retry-after") | .value' 2>/dev/null | head -1)
+                        w=$(outlook_retry_wait "$after" "$round")
+                        [ "$w" -gt "$wait_for" ] && wait_for="$w"
+                        continue
+                    fi
+                    if [ -z "$item" ]; then
+                        msg="no response for this message in the batch"
+                    else
+                        msg=$(printf '%s' "$item" | jq -r '.body.error.message // .body.error.code // "unknown error"')
+                    fi
+                    echo "  FAILED ${given[$idx]} [$status]: $msg"
+                    failed=$((failed + 1))
+                done
+
+                pending=()
+                if [ ${#throttled[@]} -gt 0 ]; then
+                    round=$((round + 1))
+                    echo "  throttled: ${#throttled[@]} message(s), retrying in ${wait_for}s (retry $round of $OUTLOOK_MAX_RETRIES)"
+                    sleep "$wait_for"
+                    pending=("${throttled[@]}")
+                fi
+            done
             echo "  progress: $moved/$total moved"
         done
 
@@ -2593,9 +2651,12 @@ ${existing_body}"
             # Always fetch via raw content endpoint (contentBytes not requested
             # in listing). -f makes curl fail on an HTTP error instead of
             # silently saving the Graph error JSON as the attachment file.
-            if ! curl -sf -X GET "${GRAPH_URL}/me/messages/$msg_id/attachments/$att_id/\$value" \
+            # outlook_curl retries a throttled download; the body is in the
+            # file, so its stdout is only ever an error and is dropped.
+            if ! OUTLOOK_CURL_MAX_TIME="$OUTLOOK_TRANSFER_MAX_TIME" \
+                 outlook_curl GET -f -X GET "${GRAPH_URL}/me/messages/$msg_id/attachments/$att_id/\$value" \
                 -H "Authorization: Bearer $ACCESS_TOKEN" \
-                -o "$dest_path"; then
+                -o "$dest_path" > /dev/null; then
                 rm -f "$dest_path"
                 echo "FAILED: $att_name (download error from Graph)"
                 continue
@@ -2668,9 +2729,11 @@ ${existing_body}"
             fname=$(export_eml_filename "$received" "$msg_id")
             # -f so an HTTP error is a curl failure rather than a Graph error
             # body saved as an .eml, which the next step would parse as mail.
-            if curl -sf -X GET "${GRAPH_URL}/me/messages/$msg_id/\$value" \
+            # A throttled fetch is retried inside outlook_curl.
+            if OUTLOOK_CURL_MAX_TIME="$OUTLOOK_TRANSFER_MAX_TIME" \
+               outlook_curl GET -f -X GET "${GRAPH_URL}/me/messages/$msg_id/\$value" \
                 -H "Authorization: Bearer $ACCESS_TOKEN" \
-                -o "$dest_dir/$fname"; then
+                -o "$dest_dir/$fname" > /dev/null; then
                 written=$((written + 1))
                 continue
             fi
@@ -2686,9 +2749,10 @@ ${existing_body}"
                 if new_token=$(refresh_access_token); then
                     ACCESS_TOKEN="$new_token"
                 fi
-                if curl -sf -X GET "${GRAPH_URL}/me/messages/$msg_id/\$value" \
+                if OUTLOOK_CURL_MAX_TIME="$OUTLOOK_TRANSFER_MAX_TIME" \
+                   outlook_curl GET -f -X GET "${GRAPH_URL}/me/messages/$msg_id/\$value" \
                     -H "Authorization: Bearer $ACCESS_TOKEN" \
-                    -o "$dest_dir/$fname"; then
+                    -o "$dest_dir/$fname" > /dev/null; then
                     retry_ok=0
                 fi
             fi

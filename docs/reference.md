@@ -25,7 +25,15 @@ timezone (see [`OUTLOOK_TZ`](#environment-variables)).
 
 **Exit codes.** `0` on success, `1` on usage error, a missing account, an unresolvable ID or a
 Graph error. `batch-move` also exits `1` when any single message failed or any short ID could
-not be resolved, having moved the rest.
+not be resolved, having moved the rest. It prints `FAILED <id>` for each message it did not
+move, and when a whole batch fails, every message in that batch counts as failed.
+
+**Timeouts and retries.** Every request gives up after 10 seconds without a connection and
+120 seconds in total (600 for an upload chunk, an attachment download or an export). A request
+Graph throttles (HTTP 429) is sent again after its `Retry-After`, on any method. A 503 or 504
+is sent again only for a read (`GET`), because a write that timed out at a gateway may still
+have happened. At most three retries; see
+[`OUTLOOK_MAX_RETRIES`](#environment-variables).
 
 ## mail.sh
 
@@ -262,6 +270,8 @@ thousand messages takes five to fifteen minutes.
 | `OUTLOOK_FROM_ADDRESS` | Default From on every draft: `draft`, `mddraft`, `reply`, `mdreply`, `followup`, `forward`. `update from` overrides it on one draft |
 | `OUTLOOK_FROM_NAME` | Usually ignored - Exchange overrides the display name for addresses the mailbox owns |
 | `OUTLOOK_READ_ONLY` | Set to `1` and every command that writes or sends refuses before any request is made. Only the listings and reads run. Empty, `0`, `false`, `no` and `off` leave it off |
+| `OUTLOOK_MAX_RETRIES` | How many times a throttled request is sent again. Default `3` |
+| `OUTLOOK_MAX_RETRY_WAIT` | The longest single wait before a retry, in seconds, whatever `Retry-After` says. Default `60` |
 | `CLAUDE_PROJECT_DIR` | Where `download` writes its `inbox/` directory. Falls back to the current directory |
 
 ## Files on disk

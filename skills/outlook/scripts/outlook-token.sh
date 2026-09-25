@@ -127,7 +127,8 @@ case "$1" in
 
         echo "Testing connection..."
 
-        RESPONSE=$(curl -s -X GET "https://graph.microsoft.com/v1.0/me/mailFolders/inbox" \
+        RESPONSE=$(curl -s --connect-timeout "$OUTLOOK_CONNECT_TIMEOUT" --max-time "$OUTLOOK_MAX_TIME" \
+            -X GET "https://graph.microsoft.com/v1.0/me/mailFolders/inbox" \
             -H "Authorization: Bearer $ACCESS_TOKEN")
 
         if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
@@ -158,7 +159,8 @@ case "$1" in
         ACCESS_TOKEN=$(jq -r '.access_token' "$CREDS_FILE")
 
         # Quick test
-        RESPONSE=$(curl -s -X GET "https://graph.microsoft.com/v1.0/me" \
+        RESPONSE=$(curl -s --connect-timeout "$OUTLOOK_CONNECT_TIMEOUT" --max-time "$OUTLOOK_MAX_TIME" \
+            -X GET "https://graph.microsoft.com/v1.0/me" \
             -H "Authorization: Bearer $ACCESS_TOKEN")
 
         if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then

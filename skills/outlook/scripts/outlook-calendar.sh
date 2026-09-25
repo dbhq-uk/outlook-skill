@@ -120,20 +120,21 @@ if ! ACCESS_TOKEN=$(ensure_valid_token) || [ -z "$ACCESS_TOKEN" ]; then
     exit 1
 fi
 
-# Low-level Graph request using the current $ACCESS_TOKEN.
+# Low-level Graph request using the current $ACCESS_TOKEN. outlook_curl (in
+# lib/graph.sh) adds the timeouts and retries a throttled request.
 _graph_request() {
     local method="$1"
     local endpoint="$2"
     local data="$3"
 
     if [ -n "$data" ]; then
-        curl -s -X "$method" "${GRAPH_URL}${endpoint}" \
+        outlook_curl "$method" -X "$method" "${GRAPH_URL}${endpoint}" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -H "Prefer: outlook.timezone=\"$DEFAULT_TIMEZONE\"" \
             -d "$data"
     else
-        curl -s -X "$method" "${GRAPH_URL}${endpoint}" \
+        outlook_curl "$method" -X "$method" "${GRAPH_URL}${endpoint}" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Prefer: outlook.timezone=\"$DEFAULT_TIMEZONE\""
     fi

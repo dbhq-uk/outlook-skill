@@ -50,6 +50,7 @@ bash skills/outlook/tests/helpers_test.sh  # offline unit tests (no account need
 bash skills/outlook/tests/token_test.sh    # token refresh against a fake curl
 bash skills/outlook/tests/calendar_test.sh # calendar verbs against a fake curl
 bash skills/outlook/tests/mail_test.sh     # draft From and send summary against a fake curl
+bash skills/outlook/tests/graph_test.sh    # timeouts, 429/503 retries and batch-move failures
 bash skills/outlook/tests/send_gap_test.sh # read-only mode and the calendar send flags
 bash skills/outlook/tests/send_gate_test.sh # the hook, the ask rules and their installer
 python3 -m pytest skills/outlook-to-md/tests/ -q # archive suite (no PST needed)

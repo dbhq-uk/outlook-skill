@@ -163,7 +163,19 @@ what makes attachments up to Graph's 150 MB ceiling possible at all.
 **Bulk moves go through `$batch`.** `batch-move` resolves the destination folder once and
 sends moves twenty at a time through Graph's batch endpoint, reporting per-message failures
 and exiting non-zero if any of them failed. Looping `move` would be one round trip per message
-plus one folder lookup per message.
+plus one folder lookup per message. A batch answer with no `responses` array (an error, a
+gateway page, nothing at all) fails every message in that batch by ID: it once printed
+"0 moved, 0 failed" and exited 0. Messages Graph throttled inside a batch are sent again, and
+only those, after the longest `Retry-After` among them.
+
+**Every request has a timeout and survives throttling.** All Graph calls go through
+`outlook_curl` in `lib/graph.sh`, which adds `--connect-timeout` and `--max-time` and reads the
+status from the response headers. Outlook allows four concurrent requests per mailbox and
+answers the rest with 429 and `Retry-After`. A 429 is retried on any method, because Graph did
+nothing with the request. A 503 or 504 is retried only on `GET`, because a POST that timed out
+at a gateway may still have sent the mail. An HTTP error with no JSON body becomes a JSON error,
+so no caller mistakes an empty 503 for success. `graph_test.sh` also checks that every `curl`
+written in the scripts carries both timeouts.
 
 ## The archive is built to be stood behind
 

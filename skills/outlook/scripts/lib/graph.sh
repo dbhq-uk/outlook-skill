@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# Shared token handling and the read-only gate for the outlook scripts.
-# Sourced, never run.
+# Shared token handling, the Graph request wrapper (timeouts and throttling)
+# and the read-only gate for the outlook scripts. Sourced, never run.
 #
 # outlook-mail.sh, outlook-calendar.sh and outlook-token.sh each carried their
 # own copy of this code, and a bug in it (a failed refresh wrote an empty
@@ -153,6 +153,113 @@ refresh_access_token() {
 ensure_valid_token() {
     outlook_cached_token && return 0
     _outlook_with_token_lock _outlook_refresh_if_stale
+}
+
+# --- Requests: timeouts and throttling -------------------------------------------
+# Every Graph request goes through outlook_curl, so every one of them has a
+# timeout and handles throttling the same way.
+#
+# Without a timeout a stalled connection hangs the command for ever. Without
+# throttling handling a busy mailbox fails: Graph answers with HTTP 429 and a
+# Retry-After header, and Outlook allows only 4 concurrent requests per
+# mailbox. See https://learn.microsoft.com/en-us/graph/throttling.
+#
+# The retry rule:
+#   - 429 is retried on any method. Graph throttled the request, so it did
+#     nothing, and sending it again is safe.
+#   - 503 and 504 are retried only on GET and HEAD. A POST that timed out at a
+#     gateway may still have run, and sending it twice could send a mail twice.
+#   - The wait is Retry-After when Graph gives one, else 1s, 2s, 4s.
+#   - At most OUTLOOK_MAX_RETRIES retries, and no single wait is longer than
+#     OUTLOOK_MAX_RETRY_WAIT seconds, so a command cannot hang for minutes.
+OUTLOOK_CONNECT_TIMEOUT="${OUTLOOK_CONNECT_TIMEOUT:-10}"
+OUTLOOK_MAX_TIME="${OUTLOOK_MAX_TIME:-120}"
+# An upload chunk, an attachment download or a whole message in MIME form can
+# be large. They get longer.
+OUTLOOK_TRANSFER_MAX_TIME="${OUTLOOK_TRANSFER_MAX_TIME:-600}"
+OUTLOOK_MAX_RETRIES="${OUTLOOK_MAX_RETRIES:-3}"
+OUTLOOK_MAX_RETRY_WAIT="${OUTLOOK_MAX_RETRY_WAIT:-60}"
+
+# The status code of the last response in a curl -D header dump (the last one,
+# because a 100 Continue comes first). Prints nothing if there is none.
+_outlook_http_status() {
+    awk '/^HTTP\//{s=$2} END{if (s != "") print s}' "$1" 2>/dev/null | tr -d '\r'
+}
+
+# outlook_should_retry <method> <status>: 0 if a response with this status to
+# a request with this method should be sent again.
+outlook_should_retry() {
+    case "$2" in
+        429) return 0 ;;
+        503|504)
+            case "$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')" in
+                GET|HEAD) return 0 ;;
+            esac ;;
+    esac
+    return 1
+}
+
+# outlook_retry_wait <retry-after value or ""> <attempt, from 0>: prints the
+# seconds to wait before the next try. A Retry-After in seconds is honoured; a
+# missing or unreadable one (an HTTP date, say) gives 1, 2, 4... Capped at
+# OUTLOOK_MAX_RETRY_WAIT.
+outlook_retry_wait() {
+    local after="$1" attempt="$2" wait
+    after=$(printf '%s' "$after" | tr -d '[:space:]')
+    if [[ "$after" =~ ^[0-9]+$ ]]; then
+        wait=$((10#$after))
+    else
+        wait=$((1 << attempt))
+    fi
+    [ "$wait" -gt "$OUTLOOK_MAX_RETRY_WAIT" ] && wait="$OUTLOOK_MAX_RETRY_WAIT"
+    printf '%s\n' "$wait"
+}
+
+# outlook_curl <method> <curl arguments...>
+# Runs curl with the timeouts, retries as above, and prints the body of the
+# last attempt. Returns curl's exit status. The caller passes everything but
+# the timeouts, including -X, so the method is given twice: once here, for the
+# retry rule, and once to curl.
+#
+# OUTLOOK_CURL_MAX_TIME, set for one call, replaces the normal --max-time.
+#
+# When Graph answers 400 or above with no JSON error in the body (a gateway's
+# HTML page, or nothing at all), a JSON error is printed in its place. Callers
+# treat an empty body as success, so without this an empty 503 would read as a
+# change that had been made.
+outlook_curl() {
+    local method="$1"; shift
+    local hdr attempt=0 body rc status after wait
+    local max_time="${OUTLOOK_CURL_MAX_TIME:-$OUTLOOK_MAX_TIME}"
+
+    if ! hdr=$(mktemp "${TMPDIR:-/tmp}/outlook-headers.XXXXXX" 2>/dev/null); then
+        curl -s --connect-timeout "$OUTLOOK_CONNECT_TIMEOUT" --max-time "$max_time" "$@"
+        return
+    fi
+    while :; do
+        : > "$hdr"
+        body=$(curl -s --connect-timeout "$OUTLOOK_CONNECT_TIMEOUT" --max-time "$max_time" \
+                    -D "$hdr" "$@") && rc=0 || rc=$?
+        status=$(_outlook_http_status "$hdr")
+        if [ "$attempt" -lt "$OUTLOOK_MAX_RETRIES" ] && outlook_should_retry "$method" "$status"; then
+            after=$(awk 'tolower($1) == "retry-after:" {v=$2} END{print v}' "$hdr" | tr -d '\r')
+            wait=$(outlook_retry_wait "$after" "$attempt")
+            attempt=$((attempt + 1))
+            echo "Microsoft Graph answered HTTP $status. Retrying in ${wait}s (retry $attempt of $OUTLOOK_MAX_RETRIES)." >&2
+            sleep "$wait"
+            continue
+        fi
+        break
+    done
+    rm -f "$hdr"
+
+    if [ -n "$status" ] && [ "$status" -ge 400 ] 2>/dev/null \
+       && ! printf '%s' "$body" | jq -e 'objects | has("error")' >/dev/null 2>&1; then
+        body=$(jq -cn --arg s "$status" \
+            '{error: {code: ("HTTP" + $s), message: ("Microsoft Graph answered HTTP " + $s + " with no error details.")}}')
+    fi
+    printf '%s' "$body"
+    return "$rc"
 }
 
 # --- Read-only mode ------------------------------------------------------------
