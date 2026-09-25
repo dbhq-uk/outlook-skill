@@ -30,6 +30,7 @@ installed - so a fact needed at runtime belongs in the skill, not only in `docs/
 
 - Scripts read credentials from `~/.dbhq/outlook/<account>/`. Their one bundled dependency is `scripts/lib/graph.sh`, which holds the token code and is sourced from beside each script's real location (symlinks followed), so they run from any location. Token or refresh logic goes in that file, never back into a script: it was once copied into three scripts, and a bug in it existed three times.
 - SKILL.md references scripts via `${CLAUDE_SKILL_DIR}` (the skill's own directory), which Claude Code substitutes for personal, project, and plugin installs alike. `install.sh` therefore symlinks the whole skill directory into `~/.claude/skills/` (no rewrite). `install-codex.sh` still rewrites the variable to the install path, since Codex does not substitute it.
+- Each skill folder stands alone. `npx skills add` installs `outlook` and `outlook-to-md` separately, and the installers skip a skill whose tools are missing, so neither can count on the other being there. A skill names the other one ("the outlook skill's `export` verb") and says what to do without it; it never runs a path like `${CLAUDE_SKILL_DIR}/../<other>/`. `docs_test.sh` fails if a SKILL.md or reference does.
 - Shell scripts use `set -e`; errors go to stderr, structured output to stdout.
 - No secrets in the repo - credentials live under `~/.dbhq/outlook/`.
 - **A verb that sends is a decision, not an edit.** Every new verb must be classed in
@@ -60,7 +61,7 @@ bash skills/outlook/tests/mail_test.sh     # draft From, send summary, reply-all
 bash skills/outlook/tests/chain_marker_test.sh # the live chain marker check, against a fake Exchange
 bash skills/outlook/tests/graph_test.sh    # timeouts, 429/503 retries and batch-move failures
 bash skills/outlook/tests/setup_test.sh    # setup: public client, PKCE, no secret, the old-secret path
-bash skills/outlook/tests/docs_test.sh     # SKILL.md word limit and dashes; every verb documented
+bash skills/outlook/tests/docs_test.sh     # SKILL.md word limit and dashes; every verb documented; no path into the other skill
 bash skills/outlook/tests/send_gap_test.sh # read-only mode and the calendar send flags
 bash skills/outlook/tests/send_gate_test.sh # the hook, the ask rules and their installer
 python3 -m pytest skills/outlook-to-md/tests/ -q # archive suite (no PST needed)

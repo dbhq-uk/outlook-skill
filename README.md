@@ -103,8 +103,13 @@ flag and default is in [docs/reference.md](docs/reference.md).
 ### Any agent (Cursor, Copilot, Windsurf, Gemini, Cline and more)
 
 ```bash
-npx skills add dbhq-uk/outlook-skill
+npx skills add dbhq-uk/outlook-skill --skill '*'
 ```
+
+The repository holds two skills, `outlook` and `outlook-to-md`, and skills.sh
+offers them separately. `--skill '*'` installs both; `--skill outlook` or
+`--skill outlook-to-md` installs one. Each works on its own. Keeping an archive
+current from live mail needs both.
 
 The [skills.sh](https://skills.sh) CLI installs into whichever agent directories
 it finds, so this works outside Claude Code and Codex too.

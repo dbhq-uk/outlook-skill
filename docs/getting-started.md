@@ -27,8 +27,13 @@ Azure CLI has its own installer, documented by
 /plugin install outlook@dbhq
 ```
 
-Both skills arrive together. If you would rather run from a clone, `./install.sh` symlinks
-the same two directories into `~/.claude/skills/` - see [dev-setup](dev-setup.md).
+The plugin installs both skills together. If you would rather run from a clone, `./install.sh`
+symlinks the same two directories into `~/.claude/skills/` - see [dev-setup](dev-setup.md).
+
+Each skill also works on its own. `outlook` needs no archive, and `outlook-to-md` reads a PST
+without a mailbox. Keeping an archive current from live mail needs both: `outlook` exports the
+mail and `outlook-to-md` appends it. With only one installed, the agent says so and stops at
+the step the missing skill would do.
 
 The examples below spell out the script path as `~/.claude/skills/outlook/scripts/`,
 which is where a local install puts it. A plugin install lives elsewhere and you will not

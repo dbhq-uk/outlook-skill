@@ -5,7 +5,7 @@ description: Turn Outlook mail into organised markdown archives - from a PST exp
 
 # Outlook Email to Markdown
 
-Turn Outlook mail into an organised, integrity-verified archive of markdown files, raw email backups, and attachments. Reads a PST export, or a directory of `.eml` files - which is how live mail arrives, via the sibling `outlook` skill's `export` verb. Supports full extraction and incremental append mode, so one archive can span both.
+Turn Outlook mail into an organised, integrity-verified archive of markdown files, raw email backups, and attachments. Reads a PST export, or a directory of `.eml` files - which is how live mail arrives, via the `outlook` skill's `export` verb. Supports full extraction and incremental append mode, so one archive can span both.
 
 ## Prerequisites
 
@@ -65,16 +65,16 @@ ${CLAUDE_SKILL_DIR}/.venv/bin/python ${CLAUDE_SKILL_DIR}/scripts/outlook_to_md.p
 ### Keeping an Archive Current from Live Mail
 
 A PST is a snapshot. To carry an archive forward, export new mail with the
-sibling `outlook` skill and append it: the two produce the same shape.
+`outlook` skill and append it: the two produce the same shape.
+
+1. Export the folder as `.eml` with the outlook skill's `export` verb, for
+   example `export "Inbox/Clients" ./staging/ --since 2026-07-01`. Its own
+   instructions give the command. `--count N` caps how many messages it
+   writes, newest first (default 1000). If the outlook skill is not installed
+   or not configured, say so and stop: this skill cannot read live mail.
+2. Append the staging directory to the existing archive:
 
 ```bash
-# 1. Export live mail as .eml (needs outlook configured)
-${CLAUDE_SKILL_DIR}/../outlook/scripts/outlook-mail.sh \
-  export "Inbox/Clients" ./staging/ --since 2026-07-01
-
-# --count N caps how many messages export writes, newest first (default 1000)
-
-# 2. Append it to the existing archive
 ${CLAUDE_SKILL_DIR}/.venv/bin/python ${CLAUDE_SKILL_DIR}/scripts/outlook_to_md.py \
   ./staging/ ./archive/ --append
 ```
