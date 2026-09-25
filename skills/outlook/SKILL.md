@@ -352,7 +352,8 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rmcategory "Follow up"
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh junk <message-id>
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh notjunk <message-id>
 
-# Delete
+# Delete: moves the message to Deleted Items, where the user can restore it.
+# The message gets a new ID there.
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh delete <message-id>
 
 # Archive
@@ -398,8 +399,8 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mkdir "Urgent" inbox
 # Rename a folder (refuses well-known system folders)
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rename "Old Name" "New Name"
 
-# Delete a folder (refuses non-empty folders unless --force; refuses system
-# folders always). With --force, contents move to Deleted Items.
+# Delete a folder: moves it, and everything in it, to Deleted Items. Refuses a
+# folder that holds messages unless --force; refuses system folders always.
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rmdir "Empty Folder"
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh rmdir "Old Folder" --force
 

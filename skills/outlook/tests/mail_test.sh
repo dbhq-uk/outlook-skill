@@ -11,6 +11,7 @@
 # What this pins: OUTLOOK_FROM_ADDRESS reaches the drafts that reply, mdreply,
 # followup and forward create, and `send` shows From, To, Cc, Bcc, Subject and
 # the attachments before it posts, and posts nothing if it cannot read them.
+# `delete` and `rmdir` move to Deleted Items and never send a DELETE.
 set -u
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,6 +51,8 @@ case "$method $path" in
   "POST "*/createForward)   cat "$FAKE_DRAFT" ;;
   "PATCH /me/messages/"*)
       if [ -n "${FAKE_PATCH_ERROR:-}" ]; then cat "$FAKE_PATCH_ERROR"; else jq -c --argjson d "$data" '. + $d' "$FAKE_DRAFT"; fi ;;
+  "GET /me/mailFolders?"*)  printf '%s' '{"value":[{"id":"FOLDER1","displayName":"Old Projects"}]}' ;;
+  "GET /me/mailFolders/FOLDER1?"*) printf '{"id":"FOLDER1","totalItemCount":%s}' "${FAKE_FOLDER_COUNT:-0}" ;;
   "GET /me/messages/"*/attachments*) cat "$FAKE_ATTACHMENTS" ;;
   "GET /me/messages/"*)     cat "$FAKE_DRAFT_READ" ;;
   "POST /me/messages/"*/send) : ;;
@@ -162,6 +165,35 @@ printf '%s' '{"error":{"code":"ErrorItemNotFound","message":"The specified objec
 out=$(mail "" send "$DRAFT_ID"); rc=$?
 eq "send exits non-zero when the draft cannot be read" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
 eq "send posts nothing when the draft cannot be read" "0" "$(grep -c '/send$' "$FAKE_CURL_LOG" || true)"
+
+########################################
+# delete and rmdir: a move to Deleted Items, never a DELETE
+########################################
+# A Graph DELETE on a message skips Deleted Items and lands in Recoverable
+# Items, where the user will not look for it.
+out=$(mail "" delete "$MSG_ID"); rc=$?
+eq "delete exits 0" "0" "$rc"
+eq "delete posts one move" "1" "$(grep -c "^POST https://graph.microsoft.com/v1.0/me/messages/$MSG_ID/move\$" "$FAKE_CURL_LOG")"
+eq "delete moves to deleteditems" "deleteditems" \
+   "$(grep -A1 "/me/messages/$MSG_ID/move\$" "$FAKE_CURL_LOG" | sed -n 's/^BODY //p' | jq -r '.destinationId')"
+eq "delete sends no DELETE" "0" "$(grep -c '^DELETE ' "$FAKE_CURL_LOG" || true)"
+has "delete says where the message went" "Moved to Deleted Items" "$out"
+
+out=$(FAKE_FOLDER_COUNT=3 mail "" rmdir "Old Projects"); rc=$?
+eq "rmdir of a folder with messages and no --force exits non-zero" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
+eq "rmdir without --force changes nothing" "0" "$(grep -c '^\(POST\|DELETE\) ' "$FAKE_CURL_LOG" || true)"
+has "rmdir without --force says what --force does" "move it, and everything in it, to Deleted Items" "$out"
+
+out=$(FAKE_FOLDER_COUNT=3 mail "" rmdir "Old Projects" --force); rc=$?
+eq "rmdir --force exits 0" "0" "$rc"
+eq "rmdir --force moves the folder to deleteditems" "deleteditems" \
+   "$(grep -A1 '^POST https://graph.microsoft.com/v1.0/me/mailFolders/FOLDER1/move$' "$FAKE_CURL_LOG" | sed -n 's/^BODY //p' | jq -r '.destinationId')"
+eq "rmdir --force sends no DELETE" "0" "$(grep -c '^DELETE ' "$FAKE_CURL_LOG" || true)"
+has "rmdir says where the folder went" "Moved folder 'Old Projects' to Deleted Items" "$out"
+
+out=$(mail "" rmdir "Old Projects"); rc=$?
+eq "rmdir of an empty folder needs no --force" "1" "$(grep -c '^POST .*/mailFolders/FOLDER1/move$' "$FAKE_CURL_LOG")"
+eq "rmdir of an empty folder sends no DELETE" "0" "$(grep -c '^DELETE ' "$FAKE_CURL_LOG" || true)"
 
 echo "-----------------------------"
 printf 'PASS=%d FAIL=%d\n' "$PASS" "$FAIL"
