@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "ask": [
+      "Bash(*outlook-mail.sh send *)",
+      "Bash(*outlook-mail.sh --account * send *)",
+      "Bash(*outlook-mail.sh -a * send *)",
+      "Bash(*outlook-mail.sh\" send *)",
+      "Bash(*outlook-mail.sh\" --account * send *)",
+      "Bash(*outlook-mail.sh\" -a * send *)",
+      "Bash(*outlook-calendar.sh invite *)",
+      "Bash(*outlook-calendar.sh --account * invite *)",
+      "Bash(*outlook-calendar.sh -a * invite *)",
+      "Bash(*outlook-calendar.sh\" invite *)",
+      "Bash(*outlook-calendar.sh\" --account * invite *)",
+      "Bash(*outlook-calendar.sh\" -a * invite *)",
+      "Bash(*outlook-calendar.sh respond *)",
+      "Bash(*outlook-calendar.sh --account * respond *)",
+      "Bash(*outlook-calendar.sh -a * respond *)",
+      "Bash(*outlook-calendar.sh\" respond *)",
+      "Bash(*outlook-calendar.sh\" --account * respond *)",
+      "Bash(*outlook-calendar.sh\" -a * respond *)",
+      "Bash(*outlook-calendar.sh cancel *)",
+      "Bash(*outlook-calendar.sh --account * cancel *)",
+      "Bash(*outlook-calendar.sh -a * cancel *)",
+      "Bash(*outlook-calendar.sh\" cancel *)",
+      "Bash(*outlook-calendar.sh\" --account * cancel *)",
+      "Bash(*outlook-calendar.sh\" -a * cancel *)",
+      "Bash(*outlook-calendar.sh* --send-invites*)",
+      "Bash(*outlook-calendar.sh* --notify-attendees*)"
+    ]
+  }
+}

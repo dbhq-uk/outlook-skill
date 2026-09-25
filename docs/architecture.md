@@ -47,22 +47,55 @@ So the script resolves the timezone from the machine instead - `OUTLOOK_TZ`, `/e
 without being told to, it warns on stderr before every command. Being loudly approximate beats
 being quietly wrong: same instant, wrong wall-clock, missed meeting.
 
-## Nothing leaves without a second command
+## The send gap
 
-Every outward action in the pack is split in two, and the second half is always a separate
-verb you have to run on purpose.
+Every outward action in the pack is split in two, and the second half is a separate verb you
+have to run on purpose.
 
 | Creating | Sending |
 |---|---|
 | `draft`, `mddraft`, `reply`, `mdreply`, `forward`, `followup` | `send` |
 | `create` (an event with no attendees) | `invite` |
 
-`create` does have a form that takes attendees and invites them immediately. It exists
-because sometimes the list really has already been agreed, and it is documented as the
-exception rather than the shape of the workflow.
-
 This is not a UI nicety. An agent driving a mailbox is one confident inference away from
 mailing a client, and the gap is where a person gets to look.
+
+A split in two is only a gap if something stops the second half running straight after the
+first. Instructions in `SKILL.md` ask the agent to wait for a yes, but an instruction is only as
+strong as the agent's reading of it. So the gap is held in four layers, and each one says what
+it does not cover.
+
+**The scripts refuse the one-command sends.** `create` with an attendee list sends the
+invitations the moment the event exists, so it refuses unless `--send-invites` is on the
+command. Changing a meeting you organise sends every attendee an update, so `update` refuses
+one unless `--notify-attendees` is given. Deleting a meeting you organise sends the attendees a
+cancellation, which is Graph's documented behaviour and not the silent delete it looks like,
+so `delete` refuses one and points at `cancel`. None of this stops `send`, `invite`, `respond`
+or `cancel`, which are sends by name.
+
+**`OUTLOOK_READ_ONLY=1` refuses every command that writes or sends**, in both scripts, before
+a token is read or a request is made. It is an allow-list: each script names the verbs that
+only read, and every other verb is refused, so a verb added later is refused until somebody
+decides it only reads. It suits a triage session. It is the only layer that works the same
+under every agent.
+
+**The plugin asks before a command that sends.** Installed as a Claude Code plugin, the pack
+registers a `PreToolUse` hook, `hooks/send-gate.sh`, that answers "ask" for `send`, `invite`,
+`respond`, `cancel`, `--send-invites` and `--notify-attendees`, and stays silent for everything
+else. It reads the command as written, so a script reached through a variable or a renamed copy
+is not caught. Claude Code documents that a hook's "ask" prompts in Manual and auto mode; it
+does not document that one prompts in bypassPermissions mode.
+
+**Ask rules prompt in every mode.** Claude Code lists an explicit ask rule among the things no
+permission mode approves on its own, bypassPermissions included. `hooks/ask-rules.json` holds
+rules for the same commands, and `install.sh` offers to add them to `~/.claude/settings.json`.
+They go in your own settings, so they are never added without a yes: `install.sh --ask-rules`,
+or `y` at the prompt. `hooks/install-ask-rules.sh` adds them on its own, and only the ones that
+are missing. The symlink install does not load the plugin's hook, so for that install these
+rules are the Claude Code layer.
+
+Codex loads neither the hook nor the rules. Under Codex the gap is the scripts, read-only mode
+and the instructions.
 
 ## Replies keep everyone on the thread
 

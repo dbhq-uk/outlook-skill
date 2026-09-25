@@ -171,6 +171,16 @@ One thing to watch when reorganising in bulk: **moving a message gives it a new 
 destination folder**. If you need to move it again, re-list from where it now lives rather
 than reusing the ID you had.
 
+## A session that only reads
+
+```bash
+export OUTLOOK_READ_ONLY=1
+```
+
+Every command that writes or sends then refuses before it reaches Graph, and the listings and
+reads still work. That includes flagging and categorising below, so leave it unset for a
+session that files mail.
+
 ## Triage without moving anything
 
 ```bash

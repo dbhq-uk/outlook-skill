@@ -6,11 +6,27 @@
 # installs alike. So this script symlinks the whole skill directory into
 # ~/.claude/skills/ - every edit (scripts AND SKILL.md) is immediately live,
 # with no per-file rewrite. Re-run only when you add a new skill directory.
+#
+# Options:
+#   --ask-rules     add the ask rules in hooks/ask-rules.json to ~/.claude/settings.json
+#                   without asking - passing the flag is your consent
+#   --no-ask-rules  do not offer them
+# With neither, the rules are offered on a terminal and left alone otherwise.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_ROOT="$HOME/.claude/skills"
+
+ASK_RULES=offer
+for arg in "$@"; do
+  case "$arg" in
+    --ask-rules)    ASK_RULES=yes ;;
+    --no-ask-rules) ASK_RULES=no ;;
+    -h|--help)      sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "Unknown option: $arg (see --help)" >&2; exit 1 ;;
+  esac
+done
 
 echo "=== Outlook skill pack installer (Claude Code) ==="
 echo
@@ -109,6 +125,40 @@ else
   echo "No credentials found. Launching setup..."
   echo
   "$SETUP" || echo "Setup skipped or failed; run '$SETUP' when ready."
+fi
+
+# --- Ask rules: only ever with the user's explicit consent -------------------
+# The skill's instructions tell the agent to draft first and send only when told
+# to. An ask rule makes Claude Code enforce that: it asks you before a command
+# that sends mail, invitations or a meeting response runs, in every permission
+# mode, bypassPermissions included. They go in your own settings file, so they
+# are never added without a yes: the --ask-rules flag, or a "y" at the prompt.
+#
+# offer_ask_rules <yes|no|offer> <helper>
+# yes runs the helper with --yes. no only says how to add them later. offer
+# runs the helper, which shows the rules and asks, but only when there is a
+# terminal to ask on; otherwise it only says how. skills/outlook/tests/
+# send_gate_test.sh runs this function against a stub helper.
+offer_ask_rules() {
+  local mode="$1" helper="$2"
+  case "$mode" in
+    yes)
+      bash "$helper" --yes || echo "Ask rules were not added. Run $helper when ready." ;;
+    no)
+      echo "Ask rules not offered (--no-ask-rules). Add them any time with: $helper" ;;
+    *)
+      if [ -t 0 ]; then
+        echo "Optional: have Claude Code ask you before any command that sends something."
+        bash "$helper" || echo "Ask rules were not added. Run $helper when ready."
+      else
+        echo "Optional: to have Claude Code ask you before anything is sent, run: $helper"
+      fi ;;
+  esac
+}
+
+if [ -e "$SKILLS_ROOT/outlook" ]; then
+  echo
+  offer_ask_rules "$ASK_RULES" "$SCRIPT_DIR/hooks/install-ask-rules.sh"
 fi
 
 echo

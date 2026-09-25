@@ -29,11 +29,12 @@ jobs:
       - name: Check shell scripts parse
         # Root installers included: they grew per-skill dependency logic when the
         # repo became a pack, and a syntax error there breaks every install.
+        # hooks/ too: the plugin runs send-gate.sh before every Bash call.
         run: |
           fail=0
           while IFS= read -r s; do
             bash -n "$s" || { echo "Syntax error: $s"; fail=1; }
-          done < <({ find . -maxdepth 1 -name '*.sh'; find skills -name '*.sh'; })
+          done < <({ find . -maxdepth 1 -name '*.sh'; find skills hooks -name '*.sh'; })
           exit $fail
 
       - name: Check Python scripts parse

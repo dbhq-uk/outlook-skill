@@ -52,12 +52,6 @@ CREDS_FILE="$CONFIG_DIR/credentials.json"
 ID_CACHE_FILE="$CONFIG_DIR/id_cache.json"
 GRAPH_URL="https://graph.microsoft.com/v1.0"
 
-# Check credentials
-if [ ! -f "$CREDS_FILE" ]; then
-    echo "Error: Account '$ACCOUNT' not configured. Run: outlook-setup.sh --account $ACCOUNT"
-    exit 1
-fi
-
 # --- Token management -------------------------------------------------------
 # The token code lives in lib/graph.sh, shared by every script, so a fix to it
 # lands once. The access token is resolved from a locally-stored absolute expiry
@@ -78,6 +72,19 @@ OUTLOOK_SCRIPT_DIR=$(cd -P "$(dirname "$_self")" && pwd)
 unset _self _dir
 # shellcheck source=lib/graph.sh
 . "$OUTLOOK_SCRIPT_DIR/lib/graph.sh"
+
+# Read-only mode: with OUTLOOK_READ_ONLY set, only these verbs run. Every
+# other verb refuses here, before a token is read or a request is made. See
+# outlook_read_only_gate in lib/graph.sh. A new verb that only reads belongs in
+# this list; one that writes or sends must stay out of it.
+READ_ONLY_VERBS=(inbox unread focused sent from search read preview aliases drafts flagged thread category categories folders subfolders folder stats attachments download export)
+outlook_read_only_gate outlook-mail.sh "${1:-}" "${READ_ONLY_VERBS[@]}" || exit 1
+
+# Check credentials
+if [ ! -f "$CREDS_FILE" ]; then
+    echo "Error: Account '$ACCOUNT' not configured. Run: outlook-setup.sh --account $ACCOUNT"
+    exit 1
+fi
 
 # A failed refresh has already said why on stderr, and left credentials.json
 # as it was.
@@ -2701,5 +2708,9 @@ ${existing_body}"
         echo "  folders                    List top-level mail folders"
         echo "  subfolders [parent]        List subfolders (default: inbox)"
         echo "  stats                      Inbox statistics"
+        echo
+        echo "OUTLOOK_READ_ONLY=1 refuses every command that changes the mailbox or sends."
+        echo "Commands that only read still work: the listings, read, preview, search,"
+        echo "thread, drafts, aliases, attachments, download and export."
         ;;
 esac
