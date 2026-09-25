@@ -642,6 +642,10 @@ explicit approval:
 - **Token expired**: Automatically refreshed on next call
 - **Permission denied**: Re-run setup to re-consent
 - **Network error**: Check connectivity, retry
+- **Throttled (HTTP 429)**: the scripts wait for Graph's `Retry-After` and retry up
+  to three times on their own. Do not loop the command yourself.
+- **batch-move failures**: it prints `FAILED <id>` for each message it did not
+  move and exits 1. Re-run it with just those IDs.
 
 ## Setup
 
