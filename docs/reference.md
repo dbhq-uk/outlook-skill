@@ -96,7 +96,9 @@ Recipient lists are comma- or semicolon-separated. Nothing is sent until `send`.
 
 The chain preservation in `mdbody` works off an invisible `<span
 data-mdreply-chain-start="1">` marker injected when the reply draft is created. `body` has no
-knowledge of it.
+knowledge of it. It relies on Exchange keeping that empty span when it saves the draft;
+`skills/outlook/tests/chain_marker_live.sh` checks that against a real mailbox (see
+`AGENTS.md`).
 
 ### Attachments
 
