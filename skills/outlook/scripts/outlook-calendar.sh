@@ -307,16 +307,43 @@ list_window() {
 # datetime and the command dies. Everything below goes through this.
 urlencode() { jq -rn --arg s "$1" '$s|@uri'; }
 
-# Local wall-clock -> ISO 8601 with numeric offset, e.g. 2026-07-16T00:00:00+01:00
+# The two helpers below run on GNU date (Linux, WSL) and BSD date (macOS).
+# GNU date parses free text with -d; BSD date has no -d, and takes a format
+# with -j -f, or an adjustment with -v. Each tries GNU first, then BSD.
+
+# Local wall-clock "YYYY-MM-DD HH:MM:SS" -> ISO 8601 with numeric offset,
+# e.g. 2026-07-16T00:00:00+01:00. BSD date prints the offset as +0100, so the
+# colon is put in: Graph wants +01:00.
 local_iso() {
-    TZ="$DEFAULT_TIMEZONE" date -d "$1" +"%Y-%m-%dT%H:%M:%S%:z" 2>/dev/null \
-        || TZ="$DEFAULT_TIMEZONE" date -j -f "%Y-%m-%d %H:%M:%S" "$1" +"%Y-%m-%dT%H:%M:%S%z"
+    local out
+    if out=$(TZ="$DEFAULT_TIMEZONE" date -d "$1" +"%Y-%m-%dT%H:%M:%S%:z" 2>/dev/null); then
+        printf '%s\n' "$out"
+        return 0
+    fi
+    out=$(TZ="$DEFAULT_TIMEZONE" date -j -f "%Y-%m-%d %H:%M:%S" "$1" +"%Y-%m-%dT%H:%M:%S%z") || return 1
+    printf '%s\n' "$out" | sed 's/\([+-][0-9][0-9]\)\([0-9][0-9]\)$/\1:\2/'
 }
 
-# Local YYYY-MM-DD for a relative day expression ("today", "+7 days")
+# Local YYYY-MM-DD for "today" or a whole number of days from today
+# ("+7 days", "-30 days"). BSD date took the text as an adjustment
+# (date -v"+7 days"), which it rejects, so on a Mac every caller failed. It
+# gets -v+7d now, and no adjustment at all for today. -v is calendar arithmetic,
+# so a clock change cannot move the date.
 local_date() {
-    TZ="$DEFAULT_TIMEZONE" date -d "$1" +"%Y-%m-%d" 2>/dev/null \
-        || TZ="$DEFAULT_TIMEZONE" date -v"$1" +"%Y-%m-%d"
+    local n
+    if TZ="$DEFAULT_TIMEZONE" date -d "$1" +"%Y-%m-%d" 2>/dev/null; then
+        return 0
+    fi
+    case "$1" in
+        today) n=0 ;;
+        *) n=$(printf '%s' "$1" | sed -n 's/^ *\([+-]\{0,1\}[0-9][0-9]*\) *days\{0,1\} *$/\1/p') ;;
+    esac
+    if [ -z "$n" ]; then
+        echo "Error: cannot work out the date for '$1'" >&2
+        return 1
+    fi
+    case "$n" in [+-]*) ;; *) n="+$n" ;; esac
+    TZ="$DEFAULT_TIMEZONE" date -v"${n}d" +"%Y-%m-%d"
 }
 
 day_start() { urlencode "$(local_iso "$1 00:00:00")"; }

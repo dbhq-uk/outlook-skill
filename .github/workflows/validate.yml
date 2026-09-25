@@ -107,6 +107,39 @@ jobs:
           sys.exit(0 if ok else 1)
           PY
 
+  # macOS, because the README says the skill runs there and every other job is
+  # Linux. BSD date and dd differ from GNU in ways that broke the calendar's
+  # date window and large attachments on a Mac while every Linux check passed.
+  # These suites run with the Mac's own date, dd, sed and awk, and with
+  # /bin/bash, which is bash 3.2: that is what a script's #!/bin/bash gets on a
+  # user's Mac, so a newer bash on PATH must not stand in for it. The md_to_html
+  # tests skip here (no pandoc); the Linux job runs them.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Show the tools under test
+        run: |
+          /bin/bash --version | head -1
+          jq --version
+          # BSD date: -v works and -d does not.
+          date -v+1d +%F
+          if date -d today >/dev/null 2>&1; then echo "::error::date is GNU, not BSD"; exit 1; fi
+
+      - name: Run the offline suites with /bin/bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/bash32"
+          ln -sf /bin/bash "$RUNNER_TEMP/bash32/bash"
+          export PATH="$RUNNER_TEMP/bash32:$PATH"
+          fail=0
+          for t in helpers_test calendar_test graph_test token_test; do
+            echo "::group::$t"
+            /bin/bash "skills/outlook/tests/$t.sh" || fail=1
+            echo "::endgroup::"
+          done
+          exit $fail
+
   outlook-to-md:
     name: outlook-to-md (py${{ matrix.python-version }})
     runs-on: ubuntu-latest

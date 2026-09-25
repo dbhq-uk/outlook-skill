@@ -10,7 +10,7 @@ The **Outlook** skill for AI coding agents - Microsoft 365 email and calendar vi
 
 ```
 .claude-plugin/plugin.json        # plugin manifest
-.github/workflows/validate.yml    # CI: parse, unit tests, frontmatter, py matrix
+.github/workflows/validate.yml    # CI: parse, unit tests, frontmatter, py matrix, macOS
 hooks/                            # Claude Code send gap: PreToolUse hook, ask rules, their installer
 skills/outlook/SKILL.md     # the live mail/calendar skill (agent-facing)
 skills/outlook/scripts/     # bash scripts (jq + curl + az)
@@ -39,6 +39,10 @@ installed - so a fact needed at runtime belongs in the skill, not only in `docs/
   "The send gap".
 - Never add ask rules to a user's settings without their yes. `install.sh` offers them on a
   terminal or with `--ask-rules`, and not otherwise.
+- Scripts run on GNU tools (Linux, WSL) and on BSD tools with bash 3.2 (macOS). A `date`,
+  `dd`, `sed` or `stat` flag that only one of them has needs a fallback for the other, and
+  no bash 4 features (associative arrays, `mapfile`, `${x,,}`). The `macos` CI job runs the
+  offline suites with the Mac's own tools and `/bin/bash`.
 - House style: British English, plain hyphens.
 
 ## Validating a change

@@ -157,6 +157,12 @@ One helper, one font stack variable. Change it there and every command changes w
 
 ## Two bash constraints worth knowing
 
+**GNU and BSD both.** The scripts run on Linux and WSL (GNU `date`, `dd`, `sed`) and on macOS
+(BSD tools, and `/bin/bash` 3.2). Dates try GNU `date -d` first and fall back to BSD
+`date -j -f` or `date -v+Nd`; upload chunks are read with `tail -c` and `head -c`, which both
+have. A `macos` CI job runs the offline suites on a Mac, and `helpers_test.sh` runs the date
+helpers against a stand-in for BSD `date` on Linux too.
+
 **Attachments never touch the command line.** Base64 goes to a temp file and reaches `jq` and
 `curl` through `--rawfile`, because Linux's `MAX_ARG_STRLEN` is about 128 KB and passing the
 payload as an argument fails with "Argument list too long" for anything over roughly 96 KB.

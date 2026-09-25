@@ -128,6 +128,87 @@ api_call() {
       *) echo '{"value":[]}';;
     esac
 }
+########################################
+# local_date and local_iso on GNU date (Linux) and BSD date (macOS). On a Mac
+# local_date passed its text to `date -v`, which rejects "today" and
+# "+7 days", so today, week, events and search all failed there.
+#
+# The expected values come from python3, not from `date`, so they do not
+# depend on which date this machine has. On a GNU machine the same checks run a
+# second time against a stand-in for BSD date, so a regression shows up on
+# Linux too, not only on the macOS CI job.
+########################################
+py_date() {  # py_date <days from today>: YYYY-MM-DD in Europe/London
+    python3 -c 'import datetime, sys, zoneinfo
+t = datetime.datetime.now(zoneinfo.ZoneInfo("Europe/London")).date()
+print(t + datetime.timedelta(days=int(sys.argv[1])))' "$1"
+}
+check_dates() {  # check_dates <label>
+    eq "$1: local_date today"      "$(py_date 0)"   "$(local_date today)"
+    eq "$1: local_date +7 days"    "$(py_date 7)"   "$(local_date '+7 days')"
+    eq "$1: local_date -30 days"   "$(py_date -30)" "$(local_date '-30 days')"
+    eq "$1: local_date +365 days"  "$(py_date 365)" "$(local_date '+365 days')"
+    eq "$1: local_date +1 day"     "$(py_date 1)"   "$(local_date '+1 day')"
+    eq "$1: local_iso in summer"   "2026-07-16T00:00:00+01:00" "$(local_iso '2026-07-16 00:00:00')"
+    eq "$1: local_iso in winter"   "2026-01-16T23:59:59+00:00" "$(local_iso '2026-01-16 23:59:59')"
+    eq "$1: day_start is URL-encoded" "2026-07-16T00%3A00%3A00%2B01%3A00" "$(day_start 2026-07-16)"
+    eq "$1: an unknown expression fails" "1" "$(local_date 'next tuesday-ish' >/dev/null 2>&1 && echo 0 || echo 1)"
+}
+DEFAULT_TIMEZONE="Europe/London"
+if command -v python3 >/dev/null 2>&1 && python3 -c 'import zoneinfo' 2>/dev/null; then
+    check_dates "this machine's date"
+
+    if date -d today >/dev/null 2>&1; then
+        # A stand-in for BSD date, as far as the scripts use it: no -d, -v takes
+        # an adjustment such as +7d, and -j -f parses a given time. It is built
+        # on the real GNU date.
+        BSD_BIN=$(mktemp -d)
+        cat > "$BSD_BIN/date" <<'BSD'
+#!/bin/bash
+fmt="" adj="" input="" parse=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -d|--date*) echo "date: illegal option -- d" >&2; exit 1 ;;
+        -j) shift ;;
+        -f) parse="$2"; shift 2 ;;
+        -v) adj="$2"; shift 2 ;;
+        -v*) adj="${1#-v}"; shift ;;
+        +*) fmt="$1"; shift ;;
+        *) input="$1"; shift ;;
+    esac
+done
+[ -n "$fmt" ] || fmt="+%a %b %e %H:%M:%S %Z %Y"
+case "$fmt" in *%:z*) echo "date: %:z is GNU only" >&2; exit 1 ;; esac
+if [ -n "$input" ]; then
+    [ "$parse" = "%Y-%m-%d %H:%M:%S" ] || { echo "date: unsupported -f in this stand-in" >&2; exit 1; }
+    base=$(command /usr/bin/env date -d "$input" +%s) || exit 1
+else
+    base=$(command /usr/bin/env date +%s)
+fi
+if [ -n "$adj" ]; then
+    [[ "$adj" =~ ^([+-]?)([0-9]+)d$ ]] || { echo "date: -v$adj: illegal time format" >&2; exit 1; }
+    sign="${BASH_REMATCH[1]:-+}" n="${BASH_REMATCH[2]}"
+    day=$(command /usr/bin/env date -d "@$base" +%F)
+    exec /usr/bin/env date -d "$day $sign$n days" "$fmt"
+fi
+exec /usr/bin/env date -d "@$base" "$fmt"
+BSD
+        chmod +x "$BSD_BIN/date"
+        # A function named date runs before anything on PATH, so the helpers
+        # reach the stand-in, and the stand-in's own `env date` reaches the
+        # real one.
+        date() { "$BSD_BIN/date" "$@"; }
+        eq "stand-in: rejects -d, as BSD date does" "1" "$(date -d today >/dev/null 2>&1 && echo 0 || echo 1)"
+        eq "stand-in: rejects -v'+7 days', as BSD date does" "1" "$(date -v'+7 days' +%F >/dev/null 2>&1 && echo 0 || echo 1)"
+        eq "stand-in: takes -v+7d" "$(py_date 7)" "$(TZ=Europe/London date -v+7d +%Y-%m-%d)"
+        check_dates "BSD date"
+        unset -f date
+        rm -rf "$BSD_BIN"
+    fi
+else
+    echo "skip - local_date tests (python3 with zoneinfo not installed)"
+fi
+
 LONG_ID="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 eq "event long id passthrough" "$LONG_ID" "$(resolve_event_id "$LONG_ID")"
 eq "event short id: occurrence via calendarView" "OCCURRENCEaaaaaaaaaaaaaaaa0908" "$(resolve_event_id 'aaaaaaaa0908')"
@@ -207,10 +288,21 @@ eq "folder path Inbox/Projects/Acme" "A1" "$(resolve_folder_id 'Inbox/Projects/A
 eq "folder not found -> rc1"     "1"  "$(resolve_folder_id 'Nope' >/dev/null; echo $?)"
 # The regression that matters: a same-named ghost in the bin must never win.
 eq "bare name skips Deleted Items ghost" "PR" "$(resolve_folder_id 'Projects')"
+# The mailbox for the next two: the only "Old Project" is in the bin. Defined
+# here rather than inside $(...), because bash 3.2 (macOS) cannot parse a
+# case statement's ")" inside a command substitution.
+ghost_only_api() {
+    case "$2" in
+        "/me/mailFolders?\$top=200") echo '{"value":[{"displayName":"Deleted Items","id":"DI"},{"displayName":"Inbox","id":"IB"}]}' ;;
+        "/me/mailFolders/DI/childFolders?\$top=200") echo '{"value":[{"displayName":"Old Project","id":"GHOST"}]}' ;;
+        "/me/mailFolders/deleteditems?\$select=id") echo '{"id":"DI"}' ;;
+        *) echo '{"value":[]}' ;;
+    esac
+}
 eq "bare name skips bin even when only match" "1" \
-   "$(api_call() { case "$2" in "/me/mailFolders?\$top=200") echo '{"value":[{"displayName":"Deleted Items","id":"DI"},{"displayName":"Inbox","id":"IB"}]}';; "/me/mailFolders/DI/childFolders?\$top=200") echo '{"value":[{"displayName":"Old Project","id":"GHOST"}]}';; "/me/mailFolders/deleteditems?\$select=id") echo '{"id":"DI"}';; *) echo '{"value":[]}';; esac; }; resolve_folder_id 'Old Project' >/dev/null; echo $?)"
+   "$(api_call() { ghost_only_api "$@"; }; resolve_folder_id 'Old Project' >/dev/null; echo $?)"
 eq "explicit bin path still resolves" "GHOST" \
-   "$(api_call() { case "$2" in "/me/mailFolders?\$top=200") echo '{"value":[{"displayName":"Deleted Items","id":"DI"},{"displayName":"Inbox","id":"IB"}]}';; "/me/mailFolders/DI/childFolders?\$top=200") echo '{"value":[{"displayName":"Old Project","id":"GHOST"}]}';; "/me/mailFolders/deleteditems?\$select=id") echo '{"id":"DI"}';; *) echo '{"value":[]}';; esac; }; resolve_folder_id 'Deleted Items/Old Project')"
+   "$(api_call() { ghost_only_api "$@"; }; resolve_folder_id 'Deleted Items/Old Project')"
 
 # The token-expiry decision and the refresh itself live in scripts/lib/graph.sh
 # and are tested against the real functions in token_test.sh.
@@ -311,7 +403,7 @@ api_call() {
 eq "sendable_addresses primary first, then aliases" \
    "dan@example.com,alias1@example.com,alias2@other.co.uk" \
    "$(sendable_addresses | paste -sd, -)"
-eq "sendable_addresses drops X500/sip entries" "3" "$(sendable_addresses | wc -l)"
+eq "sendable_addresses drops X500/sip entries" "3" "$(sendable_addresses | wc -l | tr -d ' ')"
 eq "address_in_list matches alias" "0" \
    "$(sendable_addresses | address_in_list 'alias2@other.co.uk'; echo $?)"
 eq "address_in_list is case-insensitive" "0" \
