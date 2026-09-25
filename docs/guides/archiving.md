@@ -96,8 +96,10 @@ $MD/.venv/bin/python $MD/scripts/outlook_to_md.py ./staging/ ./archive/ --append
 `--since` window costs bandwidth and nothing else. Take the date from the archive's newest
 entry and overlap deliberately rather than trying to be exact.
 
-**Do not leave `--append` off when pointing at an existing archive.** Without it the run
-announces `Mode: OVERWRITE` and replaces what is there. Append is opt-in, not automatic.
+**Pass `--append` when pointing at an existing archive.** Without it the run refuses and
+changes nothing. To rebuild an archive from scratch, pass `--overwrite`: it deletes the
+archive's `emails/` folder and its index, manifest and log files, then extracts afresh. Other
+files in the output folder are left alone.
 
 `export` also takes `--count N` to cap how many messages it writes, newest first, defaulting
 to 1000.

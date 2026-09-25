@@ -203,21 +203,29 @@ Delegated permissions requested, and the whole of what the pack can do:
 ## outlook_to_md.py
 
 ```
-outlook_to_md.py [-h] [--include-deleted] [--timezone TZ] [--verbose] [--append]
-                 [--owner-email EMAIL] pst_file output_dir
+outlook_to_md.py [-h] [--include-deleted] [--timezone TZ] [--verbose]
+                 [--append | --overwrite] [--owner-email EMAIL] pst_file output_dir
 ```
 
 | Argument | Notes |
 |---|---|
 | `pst_file` | A PST file, or a directory of `.eml` files |
 | `output_dir` | Created if absent |
-| `--append` | Skip emails already archived, matched on `Message-ID`. Without it the run overwrites |
+| `--append` | Skip emails already archived, matched on `Message-ID` |
+| `--overwrite` | Replace an existing archive: delete its `emails/` folder and its index, manifest and log files first. Nothing else in `output_dir` is touched |
 | `--include-deleted` | Include deleted items from the PST (passes `-D` to `readpst`) |
 | `--timezone TZ` | Render every date in this IANA zone, e.g. `Europe/London`. An unknown name is refused. Without it, each date keeps the offset the message was sent with |
 | `--owner-email EMAIL` | Fixes `MAILER-DAEMON` senders in sent items |
 | `--verbose`, `-v` | Per-email logging |
 
 Run it with the skill's own interpreter: `~/.claude/skills/outlook-to-md/.venv/bin/python`.
+
+With neither `--append` nor `--overwrite`, an `output_dir` that already holds an archive is
+refused, and nothing in it changes.
+
+Every string in an `email.md` frontmatter block is written as a JSON string, which is valid
+YAML, so quotes, backslashes and colons in a subject or a name cannot break the block. Address
+headers are parsed as addresses, so `"Jones, Ann" <ann@example.com>` stays one entry.
 
 ### Backends
 

@@ -128,8 +128,10 @@ jobs:
 
       - name: Install test dependencies
         working-directory: skills/outlook-to-md
+        # PyYAML is for the tests only: they parse every frontmatter block the
+        # archive writes. The tool itself does not need it.
         run: |
-          python -m pip install --upgrade pip pytest
+          python -m pip install --upgrade pip pytest pyyaml
           python -m pip install -r requirements.txt
 
       - name: Run test suite
@@ -164,7 +166,7 @@ jobs:
       - name: Install the documented requirements
         working-directory: skills/outlook-to-md
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip pyyaml
           python -m pip install -r requirements.txt
 
       - name: Fetch the sample PST
@@ -190,6 +192,12 @@ jobs:
           assert attachments >= 55, f"expected about 60 attachments or more, got {attachments}"
           assert "  Errors: 0" in log, log
           assert len(list((out / "emails").rglob("email.md"))) == len(rows)
+          # Every frontmatter block parses as YAML, on real mail.
+          import yaml
+          for md in (out / "emails").rglob("email.md"):
+              lines = md.read_text(encoding="utf-8").split("\n")
+              meta = yaml.safe_load("\n".join(lines[1:lines.index("---", 1)]))
+              assert isinstance(meta, dict) and meta.get("message_id") is not None, md
           PY
 
   # THE SAME TWO LINTERS IN EVERY DBHQ SKILL REPO, added 17 Sep 2026. Nine of
