@@ -459,7 +459,7 @@ class TestReadpstBackend(unittest.TestCase):
             ex, pst = self.extractor(tmp)
             self.assertEqual(
                 ex.readpst_command(Path("/staging")),
-                ["readpst", "-e", "-8", "-o", "/staging", str(pst)],
+                ["readpst", "-j", "0", "-e", "-8", "-o", "/staging", str(pst)],
             )
 
     def test_command_with_include_deleted_adds_D(self):
@@ -467,8 +467,18 @@ class TestReadpstBackend(unittest.TestCase):
             ex, pst = self.extractor(tmp, include_deleted=True)
             self.assertEqual(
                 ex.readpst_command(Path("/staging")),
-                ["readpst", "-e", "-8", "-D", "-o", "/staging", str(pst)],
+                ["readpst", "-j", "0", "-e", "-8", "-D", "-o", "/staging", str(pst)],
             )
+
+    def test_parallel_jobs_are_off(self):
+        # readpst's parallel jobs drop the last messages of a folder now and
+        # then, with no error. -j 0 must stay, with or without -D.
+        with tempfile.TemporaryDirectory() as tmp:
+            for kwargs in ({}, {"include_deleted": True}):
+                ex, _ = self.extractor(tmp, **kwargs)
+                cmd = ex.readpst_command(Path("/staging"))
+                self.assertIn("-j", cmd)
+                self.assertEqual(cmd[cmd.index("-j") + 1], "0")
 
     def run_pst(self, tmp, **kwargs):
         """Run extract() on a .pst with readpst stubbed to write READPST_TREE."""
@@ -500,7 +510,7 @@ class TestReadpstBackend(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ex, calls = self.run_pst(tmp)
             self.assertEqual(len(calls), 1, "readpst was not run exactly once")
-            self.assertEqual(calls[0][:3], ["readpst", "-e", "-8"])
+            self.assertEqual(calls[0][:5], ["readpst", "-j", "0", "-e", "-8"])
             self.assertNotIn("-D", calls[0])
 
             out = Path(tmp) / "out"

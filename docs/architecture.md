@@ -210,9 +210,14 @@ papered over.
 ## One PST reader
 
 A `.pst` is read by `readpst` from `pst-utils`, and by nothing else. It writes each message as
-an `.eml` file in a folder tree that mirrors the PST (`readpst -e -8`, plus `-D` when
+an `.eml` file in a folder tree that mirrors the PST (`readpst -j 0 -e -8`, plus `-D` when
 `--include-deleted` is given), and that tree goes through the same `.eml` path as a live-mail
 export. So there is one parser for messages, and it is the one the tests cover most.
+
+`-j 0` turns off readpst's parallel jobs. With `-e`, readpst may split one folder's messages
+across jobs, and then it sometimes never writes the last few of them. It exits 0 and reports
+no error, so the archive is short and says it is complete. On the CI sample PST, readpst 0.6.76
+wrote 70 or 71 messages by default and 71 every time with `-j 0`.
 
 There used to be a second, Python PST backend, preferred whenever it was installed. It failed on
 every message, its last release was in 2022, and it was the only reason for a Python 3.11

@@ -154,8 +154,10 @@ With neither flag, an output directory that already holds an archive is refused.
 
 A directory input (pre-extracted `.eml` files) is handled directly and needs
 nothing else. A PST file is read with **readpst** (from pst-utils), run as
-`readpst -e -8 -o <tmp> <pst>` with `-D` added by `--include-deleted`. Its
-`.eml` output then goes through the same path as a directory input.
+`readpst -j 0 -e -8 -o <tmp> <pst>` with `-D` added by `--include-deleted`. Its
+`.eml` output then goes through the same path as a directory input. `-j 0`
+turns off readpst's parallel jobs, which can drop messages without an error.
+If you run readpst yourself and point this tool at the output, pass `-j 0` too.
 
 ## Integrity Verification
 

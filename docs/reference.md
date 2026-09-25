@@ -232,8 +232,9 @@ headers are parsed as addresses, so `"Jones, Ann" <ann@example.com>` stays one e
 ### Backends
 
 A directory input is handled directly and needs nothing else. A PST file is read with
-**readpst** (`pst-utils`): `readpst -e -8 -o <tmp> <pst>`, with `-D` added by
-`--include-deleted`. Without `readpst` a PST run stops and says how to install it.
+**readpst** (`pst-utils`): `readpst -j 0 -e -8 -o <tmp> <pst>`, with `-D` added by
+`--include-deleted`. `-j 0` turns off readpst's parallel jobs, which can drop the last messages
+of a folder without an error. Without `readpst` a PST run stops and says how to install it.
 
 ### Output
 
