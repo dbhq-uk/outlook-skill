@@ -64,7 +64,7 @@ nothing that can reach another mailbox, and no admin consent to obtain.
 ## What it covers
 
 ```bash
-outlook-mail.sh      inbox · unread · focused · sent · drafts · flagged · folder · from
+outlook-mail.sh      inbox · unread · focused · sent · drafts · flagged · category · folder · from
                            search · thread · read · preview · export
                            draft · mddraft · reply · mdreply · forward · followup
                            update · send · aliases

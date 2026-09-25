@@ -35,14 +35,15 @@ into `~/.dbhq/outlook/default/`. Nothing to do, but do not be surprised.
 token.sh test        # end-to-end: token, Graph call, inbox counts
 token.sh status      # whether the token still works, and whose mailbox it is
 token.sh refresh     # force a refresh
-token.sh get         # print the raw access token
+token.sh get         # print a valid access token, refreshed first if needed
 token.sh list        # accounts on this machine
 ```
 
 Tokens refresh automatically whenever a command needs one, so `refresh` is a diagnostic
 rather than something to schedule.
 
-`token.sh get` is how you make a Graph call the scripts do not cover:
+`token.sh get` is how you make a Graph call the scripts do not cover. It goes through the same
+expiry check as every other command, so the token it prints is good for at least a minute:
 
 ```bash
 T=$(token.sh get)

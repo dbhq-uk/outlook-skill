@@ -39,6 +39,7 @@ not be resolved, having moved the rest.
 | `sent [count]` | Sent items |
 | `drafts [count]` | Drafts |
 | `flagged [count]` | Flagged for follow-up, across folders |
+| `category <name> [count]` | Messages carrying a category, across folders, newest first. Says when there are more than `count` |
 | `folder <name> [count]` | Any folder, resolved by name |
 | `from <email> [count]` | One sender, newest first |
 | `search <query> [count]` | Default 10, max 1000, or `all` |
@@ -162,8 +163,8 @@ Graph rejects a `start` later than the current `end` and an `end` earlier than t
 | Command | Notes |
 |---|---|
 | `refresh` | Force a token refresh |
-| `get` | Print the current access token, for direct Graph calls |
-| `test` | Full round trip: token, Graph call, inbox counts |
+| `get` | Print a valid access token, for direct Graph calls. Refreshes first if it is expired or within 60 seconds of expiry |
+| `test` | Full round trip: token (refreshed if needed), Graph call, inbox counts |
 | `status` | Connected or expired, and whose mailbox |
 | `list` | Configured accounts |
 

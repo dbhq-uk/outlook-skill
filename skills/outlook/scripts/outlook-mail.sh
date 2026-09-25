@@ -721,6 +721,44 @@ export_list_messages() {
     echo "$merged" | jq --argjson max "$max" '{value: (sort_by(.receivedDateTime) | reverse | .[0:$max])}'
 }
 
+# List the messages that carry category $1, newest first, capped at $2.
+# Graph rejects $orderby alongside a categories/any() filter on some mailboxes
+# ("restriction or sort order is too complex"), so this pages through the
+# matches and sorts client-side. Asking Graph for only $2 unsorted messages
+# would return an arbitrary slice rather than the newest. The scan stops at
+# CATEGORY_SCAN_MAX, and the output says when it did.
+#
+# Prints {"value":[...], "total": N, "capped": bool}, or the Graph error object.
+CATEGORY_SCAN_MAX=1000
+category_messages() {
+    local name="$1" max="${2:-10}" escaped filter url merged page collected next capped=false
+    [[ "$max" =~ ^[0-9]+$ ]] && [ "$max" -ge 1 ] || max=10
+
+    # OData string literals escape a single quote by doubling it.
+    escaped=$(printf '%s' "$name" | sed "s/'/''/g")
+    filter="categories/any(c:c eq '$escaped')"
+    url="/me/messages?\$filter=$(urlencode "$filter")&\$top=100&\$select=id,subject,from,receivedDateTime,isRead,bodyPreview,categories"
+
+    merged='[]'
+    while [ -n "$url" ]; do
+        page=$(api_call GET "$url")
+        if printf '%s' "$page" | jq -e '.error' >/dev/null 2>&1; then
+            printf '%s' "$page"
+            return 0
+        fi
+        merged=$(jq -n --argjson a "$merged" --argjson b "$(printf '%s' "$page" | jq '.value // []')" '$a + $b')
+        next=$(printf '%s' "$page" | jq -r '."@odata.nextLink" // empty')
+        collected=$(printf '%s' "$merged" | jq 'length')
+        if [ -n "$next" ] && [ "$collected" -ge "$CATEGORY_SCAN_MAX" ]; then
+            capped=true
+            break
+        fi
+        url="${next#"$GRAPH_URL"}"    # nextLink is absolute; strip base for api_call
+    done
+    printf '%s' "$merged" | jq --argjson max "$max" --argjson capped "$capped" \
+        '{total: length, capped: $capped, value: (sort_by(.receivedDateTime) | reverse | .[0:$max])}'
+}
+
 # Commands
 case "$1" in
     inbox)
@@ -1549,6 +1587,25 @@ ${existing_body}"
             | jq 'if .error then . else {value: (.value | sort_by(.receivedDateTime))} end')
         cache_message_ids "$result"
         echo "$result" | format_messages
+        ;;
+
+    category)
+        cat_name="$2"
+        count="${3:-10}"
+        if [ -z "$cat_name" ]; then
+            echo "Usage: outlook-mail.sh category <name> [count]"
+            echo "  Lists the messages that carry the category, in any folder, newest first."
+            exit 1
+        fi
+        echo "Fetching messages in category \"$cat_name\"..."
+        result=$(category_messages "$cat_name" "$count")
+        cache_message_ids "$result"
+        echo "$result" | format_messages
+        printf '%s' "$result" | jq -r --arg n "$cat_name" '
+            select(.error | not)
+            | if .capped then "Showing \(.value | length) of the first \(.total) found. The scan stops there; narrow it with search."
+              elif .total > (.value | length) then "Showing \(.value | length) of \(.total). Pass a larger count to see the rest: category \"\($n)\" \(.total)"
+              else empty end'
         ;;
 
     categories)
@@ -2519,6 +2576,7 @@ ${existing_body}"
         echo "  from <email> [count]       Filter by sender"
         echo "  search <query> [count]     Search emails"
         echo "  flagged [count]            List messages flagged for follow-up"
+        echo "  category <name> [count]    List messages carrying a category, any folder"
         echo "  thread <id> [count]        List the whole conversation, oldest first"
         echo "  read <id>                  Read full message"
         echo "  preview <id>               Quick preview"
