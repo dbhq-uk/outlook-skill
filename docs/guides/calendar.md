@@ -31,11 +31,22 @@ guessing.
 calendar.sh today
 calendar.sh week
 calendar.sh day 2026-08-13
-calendar.sh events 20                    # next N, whenever they are
+calendar.sh events 20                    # next N in the coming year, each occurrence listed
 calendar.sh search "board meeting"       # next 90 days by default
 calendar.sh search "dentist" 365
 calendar.sh read <event-id>
 ```
+
+Every line starts with a number and the event's short ID:
+
+```
+[1] QAAAElc2ZXJpZXMwOTA4 | 2026-09-08 09:00-10:00 | Weekly sync | Teams
+```
+
+That ID is what `read`, `respond`, `cancel`, `update` and `delete` take. A recurring meeting
+appears once per occurrence, each with its own ID, so you can answer or cancel one occurrence
+without touching the series. Listings follow Graph's pages to the end of the window rather
+than stopping at 10.
 
 `read` is the one that shows attendees, their responses, the body and the organiser - list
 views do not.
@@ -115,7 +126,8 @@ says something the organiser cannot infer.
 calendar.sh free "2026-08-13T09:00" "2026-08-13T17:00"
 ```
 
-Either "You are FREE during this time period" or a list of what is in the way, with times.
+Either "You are FREE during this time period" or a list of what is in the way, with times and
+IDs. Events shown as free (reminders, markers) and cancelled events do not count.
 Both bounds are converted to offset-qualified ISO before they reach Graph, so a window given
 in local wall-clock is not silently read as UTC and shifted an hour in summer. Worth running
 before you propose a time rather than after someone declines.

@@ -49,6 +49,7 @@ CONFIG_DIR="$BASE_DIR/$ACCOUNT"
 # shellcheck disable=SC2034 # read by lib/graph.sh
 CONFIG_FILE="$CONFIG_DIR/config.json"
 CREDS_FILE="$CONFIG_DIR/credentials.json"
+EVENT_ID_CACHE_FILE="$CONFIG_DIR/event_id_cache.json"
 GRAPH_URL="https://graph.microsoft.com/v1.0"
 
 # Timezone: OUTLOOK_TZ override, else system timezone, else Europe/London fallback
@@ -193,23 +194,95 @@ die_on_error() {
     fi
 }
 
-# Format event for display
-format_event() {
-    jq -r '
-        def short_id: .[-20:];
-        def format_time: split("T")[1] | split(":")[0:2] | join(":");
-        "\(.start.dateTime | split("T")[0]) \(.start.dateTime | format_time)-\(.end.dateTime | format_time) | \(.subject // "(no subject)") | \(.location.displayName // "-") | [\(.id | short_id)]"
-    '
-}
-
-# Format events list
+# Format an event listing ({"value":[...]} from calendar_view). Every row carries
+# the event's short ID - the last 20 characters, as in the mail listings - so
+# read, update, respond, cancel and delete can act on it. Two events whose IDs
+# end the same way (occurrences of one series can) are printed with their full
+# ID instead, so a short ID on screen never resolves to the wrong event.
 format_events() {
     jq -r '
         def short_id: .[-20:];
         def format_time: split("T")[1] | split(":")[0:2] | join(":");
-        .value | to_entries | .[] |
-        "[\(.key + 1)] \(.value.start.dateTime | split("T")[0]) \(.value.start.dateTime | format_time)-\(.value.end.dateTime | format_time) | \(.value.subject // "(no subject)") | \(.value.location.displayName // "-")"
+        if .error then
+            "Error: \(.error.message // .error.code // "Unknown API error")"
+        elif (.value | length) == 0 then
+            "No events found."
+        else
+            ([.value[].id | short_id] | group_by(.) | map(select(length > 1) | .[0])) as $clash
+            | (.value | to_entries | .[] |
+                (.value.id | short_id) as $s
+                | "[\(.key + 1)] \(if ($clash | index($s)) then .value.id else $s end) | \(.value.start.dateTime | split("T")[0]) \(.value.start.dateTime | format_time)-\(.value.end.dateTime | format_time) | \(.value.subject // "(no subject)") | \(.value.location.displayName // "-")\(if .value.isCancelled then " | cancelled" else "" end)"),
+              (if .more then "Stopped at \(.value | length) events. There are more in this window; narrow it." else empty end)
+        end
     '
+}
+
+# The fields every listing asks for. showAs and isCancelled are what `free`
+# needs to tell a real clash from a placeholder.
+EVENT_SELECT="id,subject,start,end,location,showAs,isCancelled,type"
+
+# Every event in a calendarView window, oldest first, following
+# @odata.nextLink. calendarView expands a recurring series into its
+# occurrences, which /me/calendar/events does not. Graph's default page is 10
+# events, and without paging a busy week showed 10 and said nothing of the
+# rest. $1/$2 are URL-encoded bounds; $3 stops after that many (default
+# CALENDAR_VIEW_MAX). Prints {"value":[...], "more": bool} or the Graph error.
+CALENDAR_VIEW_MAX=1000
+calendar_view() {
+    local start="$1" end="$2" max="${3:-$CALENDAR_VIEW_MAX}" page_size url merged page next collected more=false
+    page_size=100
+    [ "$max" -lt "$page_size" ] && page_size="$max"
+    url="/me/calendar/calendarView?startDateTime=$start&endDateTime=$end&\$orderby=start/dateTime&\$top=$page_size&\$select=$EVENT_SELECT"
+    merged='[]'
+    while [ -n "$url" ]; do
+        page=$(api_call GET "$url")
+        if ! printf '%s' "$page" | jq -e 'type == "object" and has("value")' >/dev/null 2>&1; then
+            # An error object passes through for the caller to print; anything
+            # else (an empty or garbled body) becomes one.
+            if printf '%s' "$page" | jq -e '.error' >/dev/null 2>&1; then
+                printf '%s' "$page"
+            else
+                printf '%s' '{"error":{"code":"BadResponse","message":"Graph returned no event list."}}'
+            fi
+            return 0
+        fi
+        merged=$(jq -n --argjson a "$merged" --argjson b "$(printf '%s' "$page" | jq '.value')" '$a + $b')
+        next=$(printf '%s' "$page" | jq -r '."@odata.nextLink" // empty')
+        collected=$(printf '%s' "$merged" | jq 'length')
+        if [ "$collected" -ge "$max" ]; then
+            if [ -n "$next" ] || [ "$collected" -gt "$max" ]; then
+                more=true
+            fi
+            break
+        fi
+        url="${next#"$GRAPH_URL"}"    # nextLink is absolute; strip base for api_call
+    done
+    printf '%s' "$merged" | jq --argjson max "$max" --argjson more "$more" '{value: .[0:$max], more: $more}'
+}
+
+# Remember the full IDs a listing printed, so a short ID copied off it resolves
+# without another search. Written to a temp file and renamed into place, so a
+# concurrent reader never sees half a file.
+cache_event_ids() {
+    local response="$1" tmp
+    tmp=$(mktemp "$CONFIG_DIR/.event_id_cache.XXXXXX" 2>/dev/null) || return 0
+    if printf '%s' "$response" | jq -c '[.value[]?.id // empty]' > "$tmp" 2>/dev/null; then
+        mv -f "$tmp" "$EVENT_ID_CACHE_FILE" 2>/dev/null || rm -f "$tmp"
+    else
+        rm -f "$tmp"
+    fi
+}
+
+# List a window, cache its IDs, print it. Returns 1 on a Graph error, after
+# printing it, so the command exits non-zero.
+list_window() {
+    local result
+    result=$(calendar_view "$1" "$2")
+    printf '%s' "$result" | format_events
+    if printf '%s' "$result" | jq -e '.error' >/dev/null 2>&1; then
+        return 1
+    fi
+    cache_event_ids "$result"
 }
 
 # --- Local-time window helpers ----------------------------------------------
@@ -245,24 +318,37 @@ today_start() { day_start "$(local_date today)"; }
 today_end()   { day_end   "$(local_date today)"; }
 week_end()    { day_end   "$(local_date '+7 days')"; }
 
-# Resolve a short (20-char) event ID to its full ID. Searches upcoming events
-# first, then falls back to the most recent 250 events so past events can be
-# addressed too. Full-length IDs pass through untouched.
+# Resolve a short (20-char) event ID to its full ID. Full-length IDs pass
+# through untouched. Looks first at the IDs the last listing printed, then at
+# every occurrence from 30 days back to a year ahead (calendarView, so a single
+# occurrence of a recurring meeting is found), then at the 250 most recent
+# events and series. A short ID that matches two different events is refused
+# rather than guessed. Errors go to stderr; returns 1 on a miss or a clash.
 resolve_event_id() {
-    local event_id="$1" start full_id
+    local event_id="$1" matches n
     if [ ${#event_id} -gt 25 ]; then
         printf '%s' "$event_id"
         return 0
     fi
-    start=$(today_start)
-    full_id=$(api_call GET "/me/calendar/events?\$filter=start/dateTime%20ge%20'$start'&\$top=100&\$select=id" \
-        | jq -r ".value[].id | select(endswith(\"$event_id\"))" | head -1)
-    if [ -z "$full_id" ]; then
-        full_id=$(api_call GET "/me/events?\$top=250&\$orderby=start/dateTime%20desc&\$select=id" \
-            | jq -r ".value[].id | select(endswith(\"$event_id\"))" | head -1)
+    matches=$(jq -r --arg s "$event_id" '.[]? | select(endswith($s))' "$EVENT_ID_CACHE_FILE" 2>/dev/null | sort -u)
+    if [ -z "$matches" ]; then
+        matches=$( {
+            calendar_view "$(day_start "$(local_date '-30 days')")" "$(day_end "$(local_date '+365 days')")" \
+                | jq -r '.value[]?.id'
+            api_call GET "/me/events?\$top=250&\$orderby=start/dateTime%20desc&\$select=id" \
+                | jq -r '.value[]?.id'
+        } 2>/dev/null | jq -Rr --arg s "$event_id" 'select(endswith($s))' | sort -u)
     fi
-    [ -n "$full_id" ] || return 1
-    printf '%s' "$full_id"
+    n=$(printf '%s' "$matches" | grep -c . || true)
+    if [ "$n" -eq 0 ]; then
+        echo "Error: no event found with an ID ending in: $event_id" >&2
+        return 1
+    fi
+    if [ "$n" -gt 1 ]; then
+        echo "Error: $n events have an ID ending in $event_id. Use the full ID from the listing." >&2
+        return 1
+    fi
+    printf '%s' "$matches"
 }
 
 # Convert a comma/semicolon-separated address list into Graph attendee objects.
@@ -279,23 +365,27 @@ attendees_to_json() {
 case "$1" in
     events)
         count="${2:-10}"
+        [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -ge 1 ] || count=10
         echo "Upcoming events ($count)..."
-        start=$(today_start)
-        api_call GET "/me/calendar/events?\$filter=start/dateTime%20ge%20'$start'&\$top=$count&\$orderby=start/dateTime&\$select=id,subject,start,end,location,organizer,attendees" | format_events
+        # The next $count events in the coming year, each occurrence of a
+        # recurring meeting on its own row. Asking for $count is the point, so
+        # there is no "more" note.
+        result=$(calendar_view "$(today_start)" "$(day_end "$(local_date '+365 days')")" "$count" | jq '.more = false')
+        printf '%s' "$result" | format_events
+        if printf '%s' "$result" | jq -e '.error' >/dev/null 2>&1; then
+            exit 1
+        fi
+        cache_event_ids "$result"
         ;;
 
     today)
         echo "Today's events ($DEFAULT_TIMEZONE)..."
-        start=$(today_start)
-        end=$(today_end)
-        api_call GET "/me/calendar/calendarView?startDateTime=$start&endDateTime=$end&\$orderby=start/dateTime&\$select=id,subject,start,end,location" | format_events
+        list_window "$(today_start)" "$(today_end)"
         ;;
 
     week)
-        echo "This week's events..."
-        start=$(today_start)
-        end=$(week_end)
-        api_call GET "/me/calendar/calendarView?startDateTime=$start&endDateTime=$end&\$orderby=start/dateTime&\$select=id,subject,start,end,location" | format_events
+        echo "This week's events ($DEFAULT_TIMEZONE)..."
+        list_window "$(today_start)" "$(week_end)"
         ;;
 
     read)
@@ -306,7 +396,6 @@ case "$1" in
         fi
 
         if ! event_id=$(resolve_event_id "$event_id"); then
-            echo "Error: Event not found with ID ending in: $2"
             exit 1
         fi
 
@@ -403,7 +492,6 @@ case "$1" in
             *) echo "Error: attendee type must be 'required' or 'optional'"; exit 1 ;;
         esac
         if ! event_id=$(resolve_event_id "$event_id"); then
-            echo "Error: Event not found"
             exit 1
         fi
 
@@ -499,7 +587,6 @@ case "$1" in
         fi
 
         if ! event_id=$(resolve_event_id "$event_id"); then
-            echo "Error: Event not found"
             exit 1
         fi
 
@@ -541,7 +628,6 @@ case "$1" in
         fi
 
         if ! event_id=$(resolve_event_id "$event_id"); then
-            echo "Error: Event not found"
             exit 1
         fi
 
@@ -560,7 +646,6 @@ case "$1" in
             exit 1
         fi
         if ! event_id=$(resolve_event_id "$event_id"); then
-            echo "Error: Event not found"
             exit 1
         fi
         echo "Cancelling event and notifying attendees..."
@@ -589,7 +674,6 @@ case "$1" in
             *) echo "Error: response must be accept, decline, or tentative"; exit 1 ;;
         esac
         if ! event_id=$(resolve_event_id "$event_id"); then
-            echo "Error: Event not found"
             exit 1
         fi
         echo "Sending '$answer' response..."
@@ -614,7 +698,7 @@ case "$1" in
             exit 1
         fi
         echo "Events on $day ($DEFAULT_TIMEZONE)..."
-        api_call GET "/me/calendar/calendarView?startDateTime=$(day_start "$day")&endDateTime=$(day_end "$day")&\$orderby=start/dateTime&\$select=id,subject,start,end,location" | format_events
+        list_window "$(day_start "$day")" "$(day_end "$day")"
         ;;
 
     search)
@@ -630,14 +714,18 @@ case "$1" in
         start=$(today_start)
         end=$(day_end "$(local_date "+$days days")")
         echo "Searching events for '$query' (next $days days)..."
-        matches=$(api_call GET "/me/calendar/calendarView?startDateTime=$start&endDateTime=$end&\$orderby=start/dateTime&\$top=250&\$select=id,subject,start,end,location" \
-            | jq --arg q "$query" '{value: [.value[]? | select(
+        matches=$(calendar_view "$start" "$end" \
+            | jq --arg q "$query" 'if .error then . else {more, value: [.value[] | select(
                 ((.subject // "") + " " + (.location.displayName // "")) | ascii_downcase | contains($q | ascii_downcase)
-              )]}')
-        if [ "$(echo "$matches" | jq '.value | length')" -eq 0 ]; then
+              )]} end')
+        if printf '%s' "$matches" | jq -e '.error' >/dev/null 2>&1; then
+            printf '%s' "$matches" | format_events
+            exit 1
+        elif [ "$(printf '%s' "$matches" | jq '.value | length')" -eq 0 ]; then
             echo "No matching events found."
         else
-            echo "$matches" | format_events
+            cache_event_ids "$matches"
+            printf '%s' "$matches" | format_events
         fi
         ;;
 
@@ -660,19 +748,24 @@ case "$1" in
         win_start=$(urlencode "$(local_iso "$(printf '%s' "$start_time" | tr 'T' ' '):00")")
         win_end=$(urlencode "$(local_iso "$(printf '%s' "$end_time" | tr 'T' ' '):00")")
 
-        # Get events in range
-        events=$(api_call GET "/me/calendar/calendarView?startDateTime=${win_start}&endDateTime=${win_end}&\$orderby=start/dateTime&\$select=subject,start,end")
-
-        event_count=$(echo "$events" | jq '.value | length')
+        # Every event in the window, then drop the ones that do not block time:
+        # an event shown as free (a reminder, an all-day marker) and one that
+        # has been cancelled but still sits in the calendar. Counting those
+        # would report a clash that is not there.
+        events=$(calendar_view "$win_start" "$win_end")
+        if printf '%s' "$events" | jq -e '.error' >/dev/null 2>&1; then
+            printf '%s' "$events" | format_events
+            exit 1
+        fi
+        busy=$(printf '%s' "$events" | jq '{value: [.value[] | select((.showAs // "busy") != "free" and (.isCancelled | not))]}')
+        cache_event_ids "$busy"
+        event_count=$(printf '%s' "$busy" | jq '.value | length')
 
         if [ "$event_count" -eq 0 ]; then
             echo "You are FREE during this time period."
         else
             echo "You have $event_count event(s) during this period:"
-            echo "$events" | jq -r '
-                def format_time: split("T")[1] | split(":")[0:2] | join(":");
-                .value[] | "  \(.start.dateTime | format_time)-\(.end.dateTime | format_time): \(.subject)"
-            '
+            printf '%s' "$busy" | format_events
         fi
         ;;
 
@@ -681,8 +774,8 @@ case "$1" in
         echo
         echo "Usage: outlook-calendar.sh <command> [args]"
         echo
-        echo "Viewing:"
-        echo "  events [count]             List upcoming events"
+        echo "Viewing (every listing prints a short ID the other commands accept):"
+        echo "  events [count]             Next events, each occurrence of a series listed"
         echo "  today                      Today's events"
         echo "  week                       This week's events"
         echo "  day <YYYY-MM-DD>           Events on a specific date"
