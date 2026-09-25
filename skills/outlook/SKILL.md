@@ -283,6 +283,24 @@ Upload method is automatic based on file size:
 
 Multiple attachments can be added by calling `attach` multiple times on the same draft.
 
+**Inline images and signatures:**
+```bash
+# An inline image the HTML body shows with <img src="cid:logo">
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh attach <draft-id> logo.png --inline logo
+
+# Add an HTML signature to an HTML draft (mddraft and mdreply always make
+# one). Every <img> whose quoted src is a local file is
+# uploaded inline and its src rewritten to cid:, so it shows without the
+# reader allowing remote images. Relative paths are read from the HTML file's
+# directory. The block goes above the quoted chain.
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh signature <draft-id> /path/to/signature.html
+```
+
+Add the signature after the body is right, or at any point: `update mdbody`
+keeps it, and running `signature` again replaces it rather than adding a
+second one. `update body` (plain text) replaces the whole body, signature
+included. A plain-text draft (`draft`) is refused: use `mddraft`.
+
 ### Exporting Mail to a Markdown Archive
 
 Write a folder's messages out as raw `.eml`, then let `outlook-to-md` append

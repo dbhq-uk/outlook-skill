@@ -95,7 +95,7 @@ dispatch_verbs() {
 # The classification this test holds. A verb that is in the script and in
 # neither list fails the first check below, so it has to be decided on.
 MAIL_READ="inbox unread focused sent from search read preview aliases drafts flagged thread category categories folders subfolders folder stats attachments download export"
-MAIL_WRITE="draft mddraft reply update mdreply followup forward send markread markunread flag unflag categorize mkcategory rccategory rmcategory junk notjunk delete archive move batch-move bulk-move mkdir rename rmdir attach"
+MAIL_WRITE="draft mddraft reply update mdreply followup forward send signature markread markunread flag unflag categorize mkcategory rccategory rmcategory junk notjunk delete archive move batch-move bulk-move mkdir rename rmdir attach"
 CAL_READ="events today week read calendars day search free"
 CAL_WRITE="create invite quick update delete cancel respond"
 

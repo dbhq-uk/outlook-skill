@@ -127,6 +127,27 @@ Under 3 MB it is a single base64 upload. Above that the script opens a Graph upl
 and streams 4 MB chunks with a progress bar, which is what makes 150 MB attachments possible
 at all - Graph's simple upload cannot carry them.
 
+### Signatures and inline images
+
+Many mail clients block remote images until the reader allows them, so a logo linked from a
+website often arrives as a broken box. An image attached inline and referenced by `cid:` shows
+straight away.
+
+```bash
+mail.sh signature <draft-id> ~/signature/dan.html
+mail.sh attach <draft-id> chart.png --inline chart   # one image, for <img src="cid:chart">
+```
+
+`signature` takes an HTML file. Each `<img>` whose quoted `src` is a local file, relative to
+the HTML file or absolute, is uploaded as an inline attachment and its `src` rewritten to
+`cid:`. Remote URLs and existing `cid:` or `data:` images are left alone. The block goes just
+above the quoted chain on a reply, or at the end of a new message. It needs an HTML draft, so
+make new mail with `mddraft`.
+
+The block is marked, so `update mdbody` keeps it when it rewrites the message, and running
+`signature` again replaces it and skips images already attached. `update body`, the plain-text
+form, replaces the whole body and the signature with it.
+
 ## Forwards and chasers
 
 ```bash

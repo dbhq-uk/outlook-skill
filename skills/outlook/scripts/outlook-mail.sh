@@ -796,6 +796,181 @@ category_messages() {
         '{total: length, capped: $capped, value: (sort_by(.receivedDateTime) | reverse | .[0:$max])}'
 }
 
+# --- Attachments --------------------------------------------------------------
+# attach_file_to_draft <draft-id> <file> [content-id]
+# Uploads <file> to the draft: a single POST under 3 MB, an upload session above.
+# With a content-id the attachment is inline (isInline, contentId), so the body
+# can show it with <img src="cid:content-id">. `attach` and `signature` both use
+# it. Exits on any error, so call it directly, never in $(...).
+attach_file_to_draft() {
+    local draft_id="$1" file_path="$2" content_id="${3:-}"
+    local file_name file_size content_type SMALL_FILE_LIMIT b64_file payload_file result
+    local session_payload session_result upload_url CHUNK_SIZE offset chunk_end
+    local chunk_length progress bar_filled bar_empty chunk_result inline_note=""
+    [ -n "$content_id" ] && inline_note=" (inline, cid:$content_id)"
+
+    # Get file info
+    file_name=$(basename "$file_path")
+    file_size=$(stat -f%z "$file_path" 2>/dev/null || stat -c%s "$file_path" 2>/dev/null)
+
+    # Detect content type
+    content_type=$(file --mime-type -b "$file_path" 2>/dev/null || echo "application/octet-stream")
+
+    # Size threshold: 3MB = 3145728 bytes
+    SMALL_FILE_LIMIT=3145728
+
+    if [ "$file_size" -lt "$SMALL_FILE_LIMIT" ]; then
+        # Simple upload for small files
+        echo "Attaching $file_name ($(echo "scale=1; $file_size / 1024" | bc)KB)..."
+
+        # Base64 encode to a TEMP FILE, never a shell variable: a variable
+        # would be passed to jq/curl as an argv string and blow Linux's
+        # ~128KB MAX_ARG_STRLEN limit ("Argument list too long") for any
+        # attachment over ~96KB. Keep the bytes off the command line.
+        b64_file=$(mktemp) || { echo "Error: cannot create temp file"; exit 1; }
+        payload_file=$(mktemp) || { rm -f "$b64_file"; echo "Error: cannot create temp file"; exit 1; }
+
+        if base64 --help 2>&1 | grep -q GNU; then
+            base64 -w0 "$file_path" > "$b64_file"
+        else
+            base64 -i "$file_path" | tr -d '\n' > "$b64_file"
+        fi
+
+        jq -n \
+            --arg name "$file_name" \
+            --arg contentType "$content_type" \
+            --arg cid "$content_id" \
+            --rawfile contentBytes "$b64_file" \
+            '{
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": $name,
+                "contentType": $contentType,
+                "contentBytes": ($contentBytes | rtrimstr("\n"))
+            } + (if $cid != "" then {isInline: true, contentId: $cid} else {} end)' > "$payload_file"
+
+        result=$(api_call_file POST "/me/messages/$draft_id/attachments" "$payload_file")
+        rm -f "$b64_file" "$payload_file"
+
+        if echo "$result" | jq -e '.error' > /dev/null 2>&1; then
+            echo "Error attaching file:"
+            echo "$result" | jq -r '.error.message'
+            exit 1
+        fi
+
+        echo "Attached: $file_name to draft$inline_note"
+    else
+        # Chunked upload for large files (3MB - 150MB)
+        echo "Attaching $file_name ($(echo "scale=1; $file_size / 1048576" | bc)MB) via chunked upload..."
+
+        # Create upload session
+        session_payload=$(jq -n \
+            --arg name "$file_name" \
+            --argjson size "$file_size" \
+            --arg cid "$content_id" \
+            '{
+                "AttachmentItem": ({
+                    "attachmentType": "file",
+                    "name": $name,
+                    "size": $size
+                } + (if $cid != "" then {isInline: true, contentId: $cid} else {} end))
+            }')
+
+        session_result=$(api_call POST "/me/messages/$draft_id/attachments/createUploadSession" "$session_payload")
+
+        upload_url=$(echo "$session_result" | jq -r '.uploadUrl // empty')
+        if [ -z "$upload_url" ]; then
+            echo "Error creating upload session:"
+            echo "$session_result" | jq -r '.error.message // .'
+            exit 1
+        fi
+
+        # Upload in 4MB chunks
+        CHUNK_SIZE=4194304
+        offset=0
+
+        while [ "$offset" -lt "$file_size" ]; do
+            # Calculate chunk end
+            chunk_end=$((offset + CHUNK_SIZE - 1))
+            if [ "$chunk_end" -ge "$file_size" ]; then
+                chunk_end=$((file_size - 1))
+            fi
+            chunk_length=$((chunk_end - offset + 1))
+
+            # Progress indicator
+            progress=$((offset * 100 / file_size))
+            bar_filled=$((progress / 10))
+            bar_empty=$((10 - bar_filled))
+            printf "\rUploading: [%s%s] %d%%" "$(printf '#%.0s' $(seq 1 $bar_filled 2>/dev/null) || echo '')" "$(printf ' %.0s' $(seq 1 $bar_empty 2>/dev/null) || echo '')" "$progress"
+
+            # Extract chunk efficiently (using large block size with byte-level positioning)
+            # iflag=skip_bytes,count_bytes makes skip/count work in bytes regardless of bs
+            chunk_result=$(dd if="$file_path" bs=1M iflag=skip_bytes,count_bytes skip="$offset" count="$chunk_length" 2>/dev/null | \
+            curl -s -X PUT "$upload_url" \
+                -H "Content-Type: application/octet-stream" \
+                -H "Content-Length: $chunk_length" \
+                -H "Content-Range: bytes ${offset}-${chunk_end}/${file_size}" \
+                --data-binary @-)
+
+            # Check for errors in chunk upload
+            # Note: Successful uploads return empty body (HTTP 200) or JSON with nextExpectedRanges
+            # Errors return JSON with .error object
+            if [ -n "$chunk_result" ]; then
+                # Only check for errors if there's a response body
+                if echo "$chunk_result" | jq -e '.error' > /dev/null 2>&1; then
+                    echo ""
+                    echo "Error uploading chunk at offset $offset:"
+                    echo "$chunk_result" | jq '.'
+                    exit 1
+                fi
+            fi
+
+            offset=$((chunk_end + 1))
+        done
+
+        printf "\rUploading: [##########] 100%%\n"
+        echo "Attached: $file_name to draft$inline_note"
+    fi
+}
+
+# A content ID goes into the body as cid:<id> and into a MIME header, so keep it
+# to characters that need no escaping in either.
+valid_content_id() {
+    [[ "$1" =~ ^[A-Za-z0-9._@-]+$ ]]
+}
+
+# --- Signature block -----------------------------------------------------------
+# `signature` wraps the block it inserts in these two empty spans, the same way
+# mdreply marks where the quoted chain starts, so `update mdbody` can find the
+# block and keep it. Only the part of the body BEFORE the chain marker is
+# searched: a quoted earlier message of yours can carry a signature block too,
+# and that one belongs to the quote.
+CHAIN_MARKER='<span data-mdreply-chain-start="1"></span>'
+SIG_START='<span data-outlook-signature-start="1"></span>'
+SIG_END='<span data-outlook-signature-end="1"></span>'
+
+# signature_block_of <html>: prints the marked signature block, markers
+# included, from the part of <html> before the chain marker. Prints nothing if
+# there is none.
+signature_block_of() {
+    local head="$1" rest
+    [[ "$head" == *"$CHAIN_MARKER"* ]] && head="${head%%"$CHAIN_MARKER"*}"
+    [[ "$head" == *"$SIG_START"*"$SIG_END"* ]] || return 0
+    rest="${head#*"$SIG_START"}"
+    printf '%s' "${SIG_START}${rest%%"$SIG_END"*}${SIG_END}"
+}
+
+# Every quoted <img src> in an HTML file that points at a local file: not a URL,
+# not cid: and not data:. file:// is local. One per line, sorted, unique.
+# shellcheck disable=SC2016 # jq program, not shell
+SIG_LOCAL_SRCS='[scan("<img\\b[^>]*?\\bsrc\\s*=\\s*(?:\"([^\"]*)\"|\u0027([^\u0027]*)\u0027)"; "i") | (.[0] // .[1])]
+    | map(select(test("^file:"; "i") or (test("^(?:[a-z][a-z0-9+.-]*:|//)"; "i") | not)))
+    | unique | .[]'
+
+# Rewrites each quoted <img src> found in $map (src -> content id) to cid:<id>.
+# shellcheck disable=SC2016 # jq program, not shell
+SIG_REWRITE_SRCS='gsub("(?<pre><img\\b[^>]*?\\bsrc\\s*=\\s*)(?<q>[\"\u0027])(?<src>[^\"\u0027]*)[\"\u0027]";
+    "\(.pre)\(.q)\(if $map[.src] then "cid:" + $map[.src] else .src end)\(.q)"; "i")'
+
 # Commands
 case "$1" in
     inbox)
@@ -1153,14 +1328,18 @@ case "$1" in
                 # Those commands inject a `<span data-mdreply-chain-start="1"></span>`
                 # marker between the new message and the quoted history. If we find
                 # that marker, keep everything from the marker onwards.
-                chain_marker='<span data-mdreply-chain-start="1"></span>'
+                # A block added by `signature` is kept too, between the new
+                # message and the chain, so an edit never drops it.
+                chain_marker="$CHAIN_MARKER"
                 existing_body=$(api_call GET "/me/messages/$draft_id?\$select=body" | jq -r '.body.content // ""')
+                sig_part=$(signature_block_of "$existing_body")
+                [ -n "$sig_part" ] && sig_part="<br/>${sig_part}"
                 if [[ "$existing_body" == *"$chain_marker"* ]]; then
                     # Everything from the first occurrence of the marker onwards
                     chain_part="${chain_marker}${existing_body#*"$chain_marker"}"
-                    full_body="${html_body}<br/>${chain_part}"
+                    full_body="${html_body}${sig_part}<br/>${chain_part}"
                 else
-                    full_body="${html_body}"
+                    full_body="${html_body}${sig_part}"
                 fi
 
                 payload=$(jq -n --arg body "$full_body" '{body: {contentType: "HTML", content: $body}}')
@@ -2515,11 +2694,131 @@ ${existing_body}"
         fi
         ;;
 
-    attach)
+    signature)
         draft_id="$2"
-        file_path="$3"
+        sig_file="$3"
+        if [ -z "$draft_id" ] || [ -z "$sig_file" ]; then
+            echo "Usage: outlook-mail.sh signature <draft-id> <html-file>"
+            echo "       Adds the HTML signature in <html-file> to an HTML draft. Every <img>"
+            echo "       whose quoted src is a local file is uploaded as an inline attachment"
+            echo "       and shown with cid:, so it displays without loading remote images."
+            echo "       Relative paths are read from the HTML file's own directory. Running"
+            echo "       it again replaces the block, and update mdbody keeps it."
+            exit 1
+        fi
+        if [ ! -f "$sig_file" ]; then
+            echo "Error: File not found: $sig_file"
+            exit 1
+        fi
+        if ! draft_id=$(resolve_message_id "$draft_id" "drafts"); then
+            echo "Error: Draft not found with ID: $2"
+            exit 1
+        fi
+
+        # The draft must already be HTML: a signature with images cannot go in
+        # a plain-text body.
+        current=$(api_call GET "/me/messages/$draft_id?\$select=body")
+        die_on_error "$current" "reading the draft"
+        if [ "$(printf '%s' "$current" | jq -r '.body.contentType // "" | ascii_downcase')" != "html" ]; then
+            echo "Error: this draft has a plain-text body, and a signature needs HTML."
+            echo "  Create the draft with mddraft or mdreply, then add the signature."
+            exit 1
+        fi
+        body=$(printf '%s' "$current" | jq -r '.body.content // ""')
+
+        sig_dir=$(cd "$(dirname "$sig_file")" && pwd)
+        sig_html=$(cat "$sig_file")
+
+        # Check every local image exists before uploading any, so a typo in
+        # the file leaves the draft as it was.
+        srcs=()
+        while IFS= read -r src; do
+            [ -n "$src" ] && srcs+=("$src")
+        done < <(printf '%s' "$sig_html" | jq -Rrs "$SIG_LOCAL_SRCS")
+        paths=()
+        missing=""
+        for src in "${srcs[@]}"; do
+            path="${src#file://}"
+            case "$path" in /*) ;; *) path="$sig_dir/$path" ;; esac
+            [ -f "$path" ] || missing="$missing
+  $src"
+            paths+=("$path")
+        done
+        if [ -n "$missing" ]; then
+            echo "Error: these images in $sig_file were not found:$missing"
+            echo "Nothing was uploaded and the draft is unchanged."
+            exit 1
+        fi
+
+        # Content IDs already on the draft, so a second run does not upload
+        # the same images again.
+        have_cids=$(api_call GET "/me/messages/$draft_id/attachments?\$select=contentId,isInline" \
+            | jq -r '.value[]? | select(.isInline == true) | .contentId // empty')
+
+        map='{}'
+        i=0
+        for src in "${srcs[@]}"; do
+            path="${paths[$i]}"
+            i=$((i + 1))
+            cid="sig-$i-$(basename "$path" | tr -c 'A-Za-z0-9._\n-' '-' | tr -d '\n')"
+            map=$(jq -cn --argjson m "$map" --arg s "$src" --arg c "$cid" '$m + {($s): $c}')
+            if printf '%s\n' "$have_cids" | grep -qxF -- "$cid"; then
+                echo "Already attached: $(basename "$path") (cid:$cid)"
+            else
+                attach_file_to_draft "$draft_id" "$path" "$cid"
+            fi
+        done
+
+        block="${SIG_START}$(printf '%s' "$sig_html" | jq -Rrs --argjson map "$map" "$SIG_REWRITE_SRCS")${SIG_END}"
+
+        # Replace a block this command added before; otherwise put it just
+        # above the quoted chain, or at the end of the body.
+        if [[ "$body" == *"$CHAIN_MARKER"* ]]; then
+            head="${body%%"$CHAIN_MARKER"*}"
+            tail="${CHAIN_MARKER}${body#*"$CHAIN_MARKER"}"
+        else
+            head="$body"
+            tail=""
+        fi
+        old_block=$(signature_block_of "$head")
+        if [ -n "$old_block" ]; then
+            head="${head%%"$SIG_START"*}${block}${head#*"$SIG_END"}"
+        elif [ -n "$tail" ]; then
+            head="${head}<br/>${block}<br/>"
+        elif [[ "$head" == *"</body>"* ]]; then
+            head="${head%</body>*}<br/>${block}</body>${head##*</body>}"
+        else
+            head="${head}<br/>${block}"
+        fi
+
+        payload=$(jq -n --arg b "${head}${tail}" '{body: {contentType: "HTML", content: $b}}')
+        die_on_error "$(api_call PATCH "/me/messages/$draft_id" "$payload")" "adding the signature"
+        echo "Signature added with ${#srcs[@]} inline image(s)."
+        ;;
+
+    attach)
+        # --inline <cid> may sit anywhere after the verb.
+        content_id=""
+        pos=()
+        shift
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --inline)
+                    [ -n "${2:-}" ] || { echo "Error: --inline needs a content ID, e.g. --inline logo"; exit 1; }
+                    content_id="$2"; shift 2 ;;
+                *) pos+=("$1"); shift ;;
+            esac
+        done
+        draft_id="${pos[0]:-}"
+        file_path="${pos[1]:-}"
         if [ -z "$draft_id" ] || [ -z "$file_path" ]; then
-            echo "Usage: outlook-mail.sh attach <draft-id> <file-path>"
+            echo "Usage: outlook-mail.sh attach <draft-id> <file-path> [--inline <content-id>]"
+            echo "       --inline uploads it as an inline image, which the body shows"
+            echo "       with <img src=\"cid:<content-id>\">."
+            exit 1
+        fi
+        if [ -n "$content_id" ] && ! valid_content_id "$content_id"; then
+            echo "Error: content ID '$content_id' may only use letters, digits, '.', '_', '-' and '@'"
             exit 1
         fi
 
@@ -2531,129 +2830,11 @@ ${existing_body}"
 
         # Resolve short ID to full ID (search in drafts folder)
         if ! draft_id=$(resolve_message_id "$draft_id" "drafts"); then
-            echo "Error: Draft not found with ID: $2"
+            echo "Error: Draft not found with ID: ${pos[0]}"
             exit 1
         fi
 
-        # Get file info
-        file_name=$(basename "$file_path")
-        file_size=$(stat -f%z "$file_path" 2>/dev/null || stat -c%s "$file_path" 2>/dev/null)
-
-        # Detect content type
-        content_type=$(file --mime-type -b "$file_path" 2>/dev/null || echo "application/octet-stream")
-
-        # Size threshold: 3MB = 3145728 bytes
-        SMALL_FILE_LIMIT=3145728
-
-        if [ "$file_size" -lt "$SMALL_FILE_LIMIT" ]; then
-            # Simple upload for small files
-            echo "Attaching $file_name ($(echo "scale=1; $file_size / 1024" | bc)KB)..."
-
-            # Base64 encode to a TEMP FILE, never a shell variable: a variable
-            # would be passed to jq/curl as an argv string and blow Linux's
-            # ~128KB MAX_ARG_STRLEN limit ("Argument list too long") for any
-            # attachment over ~96KB. Keep the bytes off the command line.
-            b64_file=$(mktemp) || { echo "Error: cannot create temp file"; exit 1; }
-            payload_file=$(mktemp) || { rm -f "$b64_file"; echo "Error: cannot create temp file"; exit 1; }
-
-            if base64 --help 2>&1 | grep -q GNU; then
-                base64 -w0 "$file_path" > "$b64_file"
-            else
-                base64 -i "$file_path" | tr -d '\n' > "$b64_file"
-            fi
-
-            jq -n \
-                --arg name "$file_name" \
-                --arg contentType "$content_type" \
-                --rawfile contentBytes "$b64_file" \
-                '{
-                    "@odata.type": "#microsoft.graph.fileAttachment",
-                    "name": $name,
-                    "contentType": $contentType,
-                    "contentBytes": ($contentBytes | rtrimstr("\n"))
-                }' > "$payload_file"
-
-            result=$(api_call_file POST "/me/messages/$draft_id/attachments" "$payload_file")
-            rm -f "$b64_file" "$payload_file"
-
-            if echo "$result" | jq -e '.error' > /dev/null 2>&1; then
-                echo "Error attaching file:"
-                echo "$result" | jq -r '.error.message'
-                exit 1
-            fi
-
-            echo "Attached: $file_name to draft"
-        else
-            # Chunked upload for large files (3MB - 150MB)
-            echo "Attaching $file_name ($(echo "scale=1; $file_size / 1048576" | bc)MB) via chunked upload..."
-
-            # Create upload session
-            session_payload=$(jq -n \
-                --arg name "$file_name" \
-                --argjson size "$file_size" \
-                '{
-                    "AttachmentItem": {
-                        "attachmentType": "file",
-                        "name": $name,
-                        "size": $size
-                    }
-                }')
-
-            session_result=$(api_call POST "/me/messages/$draft_id/attachments/createUploadSession" "$session_payload")
-
-            upload_url=$(echo "$session_result" | jq -r '.uploadUrl // empty')
-            if [ -z "$upload_url" ]; then
-                echo "Error creating upload session:"
-                echo "$session_result" | jq -r '.error.message // .'
-                exit 1
-            fi
-
-            # Upload in 4MB chunks
-            CHUNK_SIZE=4194304
-            offset=0
-
-            while [ "$offset" -lt "$file_size" ]; do
-                # Calculate chunk end
-                chunk_end=$((offset + CHUNK_SIZE - 1))
-                if [ "$chunk_end" -ge "$file_size" ]; then
-                    chunk_end=$((file_size - 1))
-                fi
-                chunk_length=$((chunk_end - offset + 1))
-
-                # Progress indicator
-                progress=$((offset * 100 / file_size))
-                bar_filled=$((progress / 10))
-                bar_empty=$((10 - bar_filled))
-                printf "\rUploading: [%s%s] %d%%" "$(printf '#%.0s' $(seq 1 $bar_filled 2>/dev/null) || echo '')" "$(printf ' %.0s' $(seq 1 $bar_empty 2>/dev/null) || echo '')" "$progress"
-
-                # Extract chunk efficiently (using large block size with byte-level positioning)
-                # iflag=skip_bytes,count_bytes makes skip/count work in bytes regardless of bs
-                chunk_result=$(dd if="$file_path" bs=1M iflag=skip_bytes,count_bytes skip="$offset" count="$chunk_length" 2>/dev/null | \
-                curl -s -X PUT "$upload_url" \
-                    -H "Content-Type: application/octet-stream" \
-                    -H "Content-Length: $chunk_length" \
-                    -H "Content-Range: bytes ${offset}-${chunk_end}/${file_size}" \
-                    --data-binary @-)
-
-                # Check for errors in chunk upload
-                # Note: Successful uploads return empty body (HTTP 200) or JSON with nextExpectedRanges
-                # Errors return JSON with .error object
-                if [ -n "$chunk_result" ]; then
-                    # Only check for errors if there's a response body
-                    if echo "$chunk_result" | jq -e '.error' > /dev/null 2>&1; then
-                        echo ""
-                        echo "Error uploading chunk at offset $offset:"
-                        echo "$chunk_result" | jq '.'
-                        exit 1
-                    fi
-                fi
-
-                offset=$((chunk_end + 1))
-            done
-
-            printf "\rUploading: [##########] 100%%\n"
-            echo "Attached: $file_name to draft"
-        fi
+        attach_file_to_draft "$draft_id" "$file_path" "$content_id"
         ;;
 
     *)
@@ -2691,7 +2872,11 @@ ${existing_body}"
         echo "Attachments:"
         echo "  attachments <id>           List attachments on message"
         echo "  download <id> [att-id]     Download attachment(s) to ./inbox/"
-        echo "  attach <draft-id> <file>   Add attachment to draft (up to 150MB)"
+        echo "  attach <draft-id> <file> [--inline <cid>]"
+        echo "                             Add attachment to draft (up to 150MB); --inline"
+        echo "                             makes it an image the body shows as cid:<cid>"
+        echo "  signature <draft-id> <html-file>"
+        echo "                             Add an HTML signature; its local images go inline"
         echo
         echo "Management:"
         echo "  markread <id>              Mark as read"

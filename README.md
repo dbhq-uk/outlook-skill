@@ -76,7 +76,7 @@ outlook-mail.sh      inbox · unread · focused · sent · drafts · flagged · 
                            search · thread · read · preview · export
                            draft · mddraft · reply · mdreply · forward · followup
                            update · send · aliases
-                           attachments · download · attach
+                           attachments · download · attach · signature
                            markread · flag · categorize · categories · junk · archive · delete
                            move · batch-move · mkdir · rename · rmdir · folders · stats
 
