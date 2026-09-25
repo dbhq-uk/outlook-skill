@@ -172,6 +172,10 @@ ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh draft "recipient@example.com" "Subje
 # Create markdown-formatted draft (converts to HTML)
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mddraft "recipient@example.com" "Subject" "**Bold** and _italic_ text"
 
+# Several recipients, and Cc/Bcc: every list is comma- or semicolon-separated.
+# The draft prints To, Cc and Bcc as Graph stored them - check them.
+${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh mddraft "a@example.com; b@example.com" "Subject" "Body" --cc "c@example.com" --bcc "audit@example.com"
+
 # Send a draft (use draft ID)
 ${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh send <draft-id>
 
