@@ -1,4 +1,4 @@
-# Keeping a PST archive current from live mail — Implementation Plan
+# Keeping a PST archive current from live mail - Implementation Plan
 
 > **Historical record, shipped July 2026.** It describes a second, Python PST backend that
 > was removed on 25 Sep 2026. `readpst` is now the only PST reader. The code quoted below is the
@@ -74,7 +74,7 @@ eq "since rejects a partial date"       "1" "$(export_since_filter '2026-07' 2>/
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `bash skills/outlook/tests/helpers_test.sh`
-Expected: FAIL — `extract_fn` returns nothing for the two undefined functions, so the `eval`s are no-ops and each `export_*` call reports "command not found" with empty output.
+Expected: FAIL - `extract_fn` returns nothing for the two undefined functions, so the `eval`s are no-ops and each `export_*` call reports "command not found" with empty output.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -178,7 +178,7 @@ eq "export reports the Graph error message" "1" \
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `bash skills/outlook/tests/helpers_test.sh`
-Expected: FAIL — `export_list_messages` is not yet defined.
+Expected: FAIL - `export_list_messages` is not yet defined.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -326,7 +326,7 @@ Insert into `skills/outlook/scripts/outlook-mail.sh` immediately after the `down
 
 - [ ] **Step 2: Add the help line**
 
-In the `*)` usage block, add this line at the end of the "Reading:" group — directly after the `preview <id>              Quick preview` line (around line 2103) and before the blank `echo` that precedes "Sending:":
+In the `*)` usage block, add this line at the end of the "Reading:" group - directly after the `preview <id>              Quick preview` line (around line 2103) and before the blank `echo` that precedes "Sending:":
 
 ```bash
         echo "  export <folder> <dir>      Write folder's messages as .eml for archiving"
@@ -342,7 +342,7 @@ Expected: no syntax output, and `FAIL=0`.
 The credentials guard at the top of the script exits before any command runs when no account is configured, so run these against a configured account, or accept the credentials error as proof the branch was reached:
 
 Run: `skills/outlook/scripts/outlook-mail.sh export 2>&1 | head -3`
-Expected: the usage line `Usage: outlook-mail.sh export <folder> <output-dir> …` (or the "Account not configured" error if no account exists — in which case verify the branch by inspection instead).
+Expected: the usage line `Usage: outlook-mail.sh export <folder> <output-dir> …` (or the "Account not configured" error if no account exists - in which case verify the branch by inspection instead).
 
 - [ ] **Step 5: Commit**
 
@@ -355,7 +355,7 @@ git commit -m "feat(export): add the export verb writing folder mail as .eml"
 
 ### Task 4: Fix directory-mode backend dispatch
 
-A directory input is currently only honoured when both libratom and readpst are absent, because the directory branch is nested inside `_extract_with_readpst`. With libratom installed — what `setup.sh` aims for — the directory is passed to `PffArchive` and raises `OSError: … Is a directory`.
+A directory input is currently only honoured when both libratom and readpst are absent, because the directory branch is nested inside `_extract_with_readpst`. With libratom installed - what `setup.sh` aims for - the directory is passed to `PffArchive` and raises `OSError: … Is a directory`.
 
 **Files:**
 - Modify: `skills/outlook-to-md/scripts/outlook_to_md.py:257-260`
@@ -407,7 +407,7 @@ class TestDirectoryDispatch(unittest.TestCase):
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cd skills/outlook-to-md && ./.venv/bin/python -m pytest tests/test_outlook_to_md.py::TestDirectoryDispatch -v -p no:cacheprovider`
-Expected: FAIL — `directory input was sent to libratom` (or an assertion that `called["dir"]` is False).
+Expected: FAIL - `directory input was sent to libratom` (or an assertion that `called["dir"]` is False).
 
 - [ ] **Step 3: Write the implementation**
 
@@ -439,7 +439,7 @@ with:
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `cd skills/outlook-to-md && ./.venv/bin/python -m pytest tests/ -v -p no:cacheprovider`
-Expected: PASS — the new test plus the existing 47 passed, 1 skipped.
+Expected: PASS - the new test plus the existing 47 passed, 1 skipped.
 
 - [ ] **Step 5: Commit**
 
@@ -531,7 +531,7 @@ class TestAppendRoundTrip(unittest.TestCase):
 - [ ] **Step 2: Run the tests to verify they pass**
 
 These should pass once Task 4 is in. Run: `cd skills/outlook-to-md && ./.venv/bin/python -m pytest tests/test_outlook_to_md.py::TestAppendRoundTrip -v -p no:cacheprovider`
-Expected: PASS. If `test_second_append_run_is_a_noop` fails, the dedupe is genuinely broken — stop and investigate rather than adjusting the test.
+Expected: PASS. If `test_second_append_run_is_a_noop` fails, the dedupe is genuinely broken - stop and investigate rather than adjusting the test.
 
 - [ ] **Step 3: Run the whole suite**
 
@@ -590,7 +590,7 @@ In `skills/outlook-to-md/SKILL.md`, after the "### Incremental Extraction (Appen
 ### Keeping an Archive Current from Live Mail
 
 A PST is a snapshot. To carry an archive forward, export new mail with the
-sibling `outlook` skill and append it — the two produce the same shape.
+sibling `outlook` skill and append it - the two produce the same shape.
 
 ```bash
 # 1. Export live mail as .eml (needs outlook configured)
@@ -604,7 +604,7 @@ ${CLAUDE_SKILL_DIR}/.venv/bin/python ${CLAUDE_SKILL_DIR}/scripts/outlook_to_md.p
 
 Deduplication is by `Message-ID`, so a `--since` window that overlaps what is
 already archived costs bandwidth and nothing else. Graph-sourced mail is
-recorded under the `pst_folder` index column like any other — the column means
+recorded under the `pst_folder` index column like any other - the column means
 "the folder this message came from", and always did.
 ````
 
@@ -711,9 +711,9 @@ or the index, so the archive format stays owned by `outlook-to-md`.
 
 ## Verified
 
-- `helpers_test.sh` — filename construction, `--since` validation, paging, cap,
+- `helpers_test.sh` - filename construction, `--since` validation, paging, cap,
   error propagation
-- `pytest tests/` — directory dispatch regression, append idempotence,
+- `pytest tests/` - directory dispatch regression, append idempotence,
   staging-to-archive layout
 - shell and Python parse gates
 - Real-mailbox round trip: STATE THE RESULT HERE, or say plainly that no
@@ -722,7 +722,7 @@ EOF
 )"
 ```
 
-Replace the last bullet with what actually happened. If Step 2 did not run, say so — do not imply it passed.
+Replace the last bullet with what actually happened. If Step 2 did not run, say so - do not imply it passed.
 
 - [ ] **Step 4: Merge once checks pass**
 
