@@ -31,7 +31,7 @@ $MD/.venv/bin/python $MD/scripts/outlook_to_md.py archive.pst ./out/ --verbose
 Useful additions:
 
 ```bash
---timezone "Europe/London"          # dates render in this zone, default UTC
+--timezone "Europe/London"          # dates render in this zone; default is the sender's offset
 --owner-email "you@example.com"     # fixes MAILER-DAEMON senders in sent items
 --include-deleted                   # deleted items too (readpst -D)
 ```

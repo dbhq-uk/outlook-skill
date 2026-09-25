@@ -27,8 +27,10 @@ that is not a file in the repository.
 
 Authentication is a **delegated** OAuth flow, not application permissions. The distinction
 matters: a delegated token can only ever do what the signed-in person can do in their own
-mailbox. There is no tenant-wide grant, no admin consent, and nothing here can reach another
-person's mail. Tokens live under `~/.dbhq/outlook/<account>/` at mode `600` and refresh
+mailbox. There is no tenant-wide grant, and nothing here can reach another person's mail.
+Delegated does not always mean no admin: whether a user may consent to `Mail.Send` and
+`Mail.ReadWrite` is the tenant's user-consent policy, and many tenants require an admin to
+approve an app that asks for them. Tokens live under `~/.dbhq/outlook/<account>/` at mode `600` and refresh
 themselves when a command needs it. A refresh that fails leaves the stored tokens exactly as
 they were, so a network blip never costs you the sign-in.
 
@@ -122,9 +124,12 @@ either form. Every listing writes the short-to-full mapping into `id_cache.json`
 common list-then-act flow resolves from cache with no extra API call. On a miss the resolver
 cascades through the folders a message might be in.
 
-The cost is a rule you have to know: **moving a message gives it a new ID**. That is Graph's
-behaviour, not a choice made here, but the short-ID cache makes it easy to forget. Re-list
-from the destination before acting on a message you have just moved.
+The cost is a rule you have to know: **moving a message gives it a new ID**. That comes from
+a choice made here. The skill uses Graph's default IDs, which change when a message changes
+folder. Graph can return immutable IDs instead, through the `Prefer: IdType="ImmutableId"`
+header, and those survive a move; the skill does not ask for them today. The short-ID cache
+makes the rule easy to forget. Re-list from the destination before acting on a message you
+have just moved.
 
 ## Email HTML that survives Outlook
 

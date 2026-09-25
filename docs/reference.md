@@ -204,7 +204,7 @@ outlook_to_md.py [-h] [--include-deleted] [--timezone TZ] [--verbose] [--append]
 | `output_dir` | Created if absent |
 | `--append` | Skip emails already archived, matched on `Message-ID`. Without it the run overwrites |
 | `--include-deleted` | Include deleted items from the PST (passes `-D` to `readpst`) |
-| `--timezone TZ` | Render dates in this zone, default UTC |
+| `--timezone TZ` | Render every date in this IANA zone, e.g. `Europe/London`. An unknown name is refused. Without it, each date keeps the offset the message was sent with |
 | `--owner-email EMAIL` | Fixes `MAILER-DAEMON` senders in sent items |
 | `--verbose`, `-v` | Per-email logging |
 

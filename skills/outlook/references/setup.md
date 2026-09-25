@@ -47,7 +47,9 @@ Copy this - you'll need it later.
    - `User.Read`
 5. Click **Add permissions**
 
-Note: Admin consent is NOT required for delegated permissions with personal/org accounts.
+Note: these are delegated permissions. A personal account consents for itself. On a work or
+school account, whether you can consent yourself depends on the tenant's user-consent policy;
+many tenants require an admin to approve an app that asks for `Mail.Send` or `Mail.ReadWrite`.
 
 ## Step 5: Create Config Files
 

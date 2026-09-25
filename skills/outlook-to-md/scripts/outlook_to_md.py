@@ -25,6 +25,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # Optional dependencies with fallbacks
 try:
@@ -156,7 +157,7 @@ class EmailExtractor:
         pst_path: Path,
         output_dir: Path,
         include_deleted: bool = False,
-        target_timezone: str = "UTC",
+        target_timezone: Optional[str] = None,
         verbose: bool = False,
         append: bool = False,
         owner_email: str = None,
@@ -165,7 +166,10 @@ class EmailExtractor:
         self.output_dir = output_dir
         self.emails_dir = output_dir / "emails"
         self.include_deleted = include_deleted
+        # None keeps each message's own offset, which is what the archive has
+        # always done. A zone name converts every date to that zone.
         self.target_timezone = target_timezone
+        self.tz = ZoneInfo(target_timezone) if target_timezone else None
         self.verbose = verbose
         self.append = append
         self.owner_email = owner_email
@@ -433,6 +437,8 @@ class EmailExtractor:
         # Ensure timezone aware
         if sent_date.tzinfo is None:
             sent_date = sent_date.replace(tzinfo=timezone.utc)
+        if self.tz is not None:
+            sent_date = sent_date.astimezone(self.tz)
 
         # Extract basic fields
         subject = msg.get('Subject', '(No Subject)')
@@ -1021,6 +1027,15 @@ class EmailExtractor:
         print("=" * 60)
 
 
+def timezone_name(value: str) -> str:
+    """argparse type for --timezone: an IANA zone name this machine knows."""
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise argparse.ArgumentTypeError(f"unknown timezone {value!r}; use an IANA name such as Europe/London")
+    return value
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Extract emails from Outlook PST files into organized markdown archive"
@@ -1030,7 +1045,13 @@ def main():
     parser.add_argument(
         "--include-deleted", action="store_true", help="Include deleted items (passes -D to readpst; PST input only)"
     )
-    parser.add_argument("--timezone", default="UTC", help="Target timezone for dates (default: UTC)")
+    parser.add_argument(
+        "--timezone",
+        type=timezone_name,
+        default=None,
+        metavar="TZ",
+        help="Render every date in this IANA zone, e.g. Europe/London (default: the offset each message was sent with)",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument(
         "--append", action="store_true", help="Append mode: skip emails already in the archive (by message ID)"

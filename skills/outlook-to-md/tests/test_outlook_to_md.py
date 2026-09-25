@@ -550,6 +550,64 @@ class TestReadpstBackend(unittest.TestCase):
                     ex.extract()
 
 
+class TestTimezoneFlag(unittest.TestCase):
+    """--timezone converts every rendered date, and an unknown zone is refused.
+
+    It was parsed and stored but never read, so every date came out in the
+    offset the sender used whatever the flag said. These run the real command
+    line, so a flag that is accepted and ignored fails here.
+    """
+
+    EML = (
+        "Message-ID: <tz@example.com>\n"
+        "Date: Mon, 01 Jul 2024 09:00:00 -0400\n"
+        "From: Alice <alice@example.com>\n"
+        "To: Bob <bob@example.com>\n"
+        "Subject: Timezones\n"
+        "Content-Type: text/plain; charset=utf-8\n"
+        "\n"
+        "Body.\n"
+    )
+
+    def run_cli(self, *extra):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name) / "staging" / "Inbox"
+        staging.mkdir(parents=True)
+        (staging / "tz.eml").write_text(self.EML)
+        out = Path(tmp.name) / "out"
+        argv = ["outlook_to_md.py", str(staging.parent), str(out), *extra]
+        with patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()):
+            outlook_to_md.main()
+        md = next(out.rglob("email.md")).read_text()
+        with open(out / "index.csv", newline="", encoding="utf-8") as f:
+            row = next(csv.DictReader(f))
+        return md, row
+
+    def test_dates_render_in_the_named_zone(self):
+        md, row = self.run_cli("--timezone", "Europe/London")
+        self.assertIn('date: "2024-07-01T14:00:00+01:00"', md)
+        self.assertEqual((row["date"], row["time"]), ("2024-07-01", "14:00:00"))
+
+    def test_a_zone_across_midnight_moves_the_date(self):
+        md, row = self.run_cli("--timezone", "Asia/Tokyo")
+        self.assertIn('date: "2024-07-01T22:00:00+09:00"', md)
+        md, row = self.run_cli("--timezone", "Pacific/Kiritimati")
+        self.assertEqual(row["date"], "2024-07-02")
+
+    def test_without_the_flag_the_sender_offset_is_kept(self):
+        md, row = self.run_cli()
+        self.assertIn('date: "2024-07-01T09:00:00-04:00"', md)
+        self.assertEqual(row["time"], "09:00:00")
+
+    def test_an_unknown_zone_is_refused(self):
+        stderr = io.StringIO()
+        with patch("sys.stderr", stderr), self.assertRaises(SystemExit) as caught:
+            self.run_cli("--timezone", "Mars/Olympus_Mons")
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("unknown timezone", stderr.getvalue())
+
+
 class TestAppendRoundTrip(unittest.TestCase):
     """A re-run over the same staging directory must skip old mail and admit new mail.
 
