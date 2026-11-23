@@ -208,6 +208,9 @@ if [ -z "$CLIENT_ID" ]; then
         if [[ ! "$use_existing" =~ ^[Nn]$ ]]; then
             CLIENT_ID="$EXISTING_APP"
             CONVERT_APP=1
+            # An app made before contacts lacks Contacts.ReadWrite; adding a
+            # permission it already has changes nothing.
+            ADD_PERMISSIONS=1
         fi
         NEW_APP_NAME="$APP_NAME-$(date +%s)"
     else
@@ -261,6 +264,7 @@ if [ -n "${ADD_PERMISSIONS:-}" ]; then
     MAIL_READ_WRITE="024d486e-b451-40bb-833d-3e66d98c5c73"    # Mail.ReadWrite
     MAIL_SEND="e383f46e-2787-4529-855e-0e479a3ffac0"          # Mail.Send
     CALENDARS_READ_WRITE="1ec239c2-d7c9-4623-a91a-a9775856bb36" # Calendars.ReadWrite
+    CONTACTS_READ_WRITE="d56682ec-c09e-4743-aaf4-1a3aac4caa21" # Contacts.ReadWrite
     OFFLINE_ACCESS="7427e0e9-2fba-42fe-b0c0-848c9e6a8182"     # offline_access
     USER_READ="e1fe6dd8-ba31-4d61-89e7-88639da4683d"          # User.Read
 
@@ -272,6 +276,9 @@ if [ -n "${ADD_PERMISSIONS:-}" ]; then
 
     echo "Adding Calendars.ReadWrite..."
     az ad app permission add --id "$CLIENT_ID" --api "$GRAPH_API" --api-permissions "$CALENDARS_READ_WRITE=Scope" 2>/dev/null || true
+
+    echo "Adding Contacts.ReadWrite..."
+    az ad app permission add --id "$CLIENT_ID" --api "$GRAPH_API" --api-permissions "$CONTACTS_READ_WRITE=Scope" 2>/dev/null || true
 
     echo "Adding offline_access..."
     az ad app permission add --id "$CLIENT_ID" --api "$GRAPH_API" --api-permissions "$OFFLINE_ACCESS=Scope" 2>/dev/null || true
