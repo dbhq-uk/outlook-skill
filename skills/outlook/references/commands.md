@@ -262,7 +262,8 @@ $K duplicates           # read-only: contacts sharing an email address or a name
 $K create --name "Ada Lovelace" --email ada@example.com --email ada@example.org \
     --mobile "+44 7700 900000" --business-phone "01632 960000" --home-phone "01632 960001" \
     --company "Analytical Co" --title "Engineer" --notes "Met at a talk" \
-    --category Blue --category Clients [--folder <name|id>]
+    --category Blue --category Clients [--folder <name|id>] \
+    [--street "1 High Street" --town Exampletown --postcode "AB1 2CD" --country "United Kingdom"]
 $K update <id> --company "New Co" --email new@example.com
 $K delete <id>
 $K move <id> --folder <name|id>

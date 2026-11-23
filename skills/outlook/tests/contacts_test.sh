@@ -30,7 +30,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 # --- Fake curl -----------------------------------------------------------------
-# Two folders: FOLDER1 (the default, "Contacts") has two pages, FOLDER2
+# Two folders: FOLDER1 (the main "Contacts" folder) has two pages, FOLDER2
 # ("Clients", with a child "Archive") has one. A GET of one contact is answered
 # from $FAKE_CONTACT. A POST that creates a contact answers with the body plus
 # an id, unless $FAKE_CREATE_FAIL is set. "METHOD URL" is logged, and on the next
@@ -49,6 +49,7 @@ printf '%s %s\n' "$method" "$url" >> "$FAKE_CURL_LOG"
 path="${url#https://graph.microsoft.com/v1.0}"
 case "$method $path" in
   "GET /me/contactFolders?"*) cat "$FAKE_FOLDERS" ;;
+  "GET /me/contactFolders/contacts") printf '{"id":"FOLDER1","displayName":"Contacts","parentFolderId":"ROOT"}' ;;
   "GET /me/contactFolders/FOLDER2/childFolders"*) printf '{"value":[{"id":"FOLDER3","displayName":"Archive","parentFolderId":"FOLDER2"}]}' ;;
   "GET /me/contactFolders/"*/childFolders*) printf '{"value":[]}' ;;
   "GET /me/contactFolders/FOLDER1/contacts"*'$skip'*) cat "$FAKE_F1_PAGE2" ;;
@@ -104,7 +105,10 @@ contact() {  # id name email company [categories-json] [folder-id]
         "$1" "$2" "$3" "$4" "${5:-[]}" "${6:-FOLDER1}"
 }
 
-printf '%s' '{"value":[{"id":"FOLDER1","displayName":"Contacts","parentFolderId":"ROOT"},{"id":"FOLDER2","displayName":"Clients","parentFolderId":"ROOT"}]}' > "$FAKE_FOLDERS"
+# Like the real Graph, /me/contactFolders lists only the folders inside the
+# main Contacts folder, never the main folder itself (FOLDER1 here), which
+# comes from /me/contactFolders/contacts.
+printf '%s' '{"value":[{"id":"FOLDER2","displayName":"Clients","parentFolderId":"FOLDER1"}]}' > "$FAKE_FOLDERS"
 printf '{"@odata.nextLink":"https://graph.microsoft.com/v1.0/me/contacts?$top=100&$skip=2","value":[%s,%s]}' \
     "$(contact "$(cid LISTONE0000000001AA=)" "Ada Lovelace" ada@example.com "Analytical Co" '["Blue"]')" \
     "$(contact "$(cid LISTTWO0000000002AA=)" "Alan Turing" alan@example.com "Bletchley Ltd")" > "$FAKE_F1_PAGE1"
@@ -207,6 +211,10 @@ eq "create body: phones" "+44 7700 900000|01632 960000|01632 960001" \
 eq "create body: company, title, notes" "Nasa|Engineer|Met at a talk" \
    "$(body | jq -r '[.companyName, .jobTitle, .personalNotes] | join("|")')"
 eq "create body: categories" "Blue,Clients" "$(body | jq -r '.categories | join(",")')"
+eq "create body: no address unless one is given" "false" "$(body | jq 'has("businessAddress")')"
+out=$(con create --name "Corner Shop" --street "1 High Street" --town Exampletown --postcode "AB1 2CD" --country "United Kingdom")
+eq "create body: the address flags fill the business address" "1 High Street|Exampletown|AB1 2CD|United Kingdom" \
+   "$(body | jq -r '.businessAddress | [.street, .city, .postalCode, .countryOrRegion] | join("|")')"
 
 out=$(con create --given Ada --surname King --email ak@example.com --folder Clients)
 eq "create --folder posts into that folder" "1" "$(grep -c '^POST https://graph.microsoft.com/v1.0/me/contactFolders/FOLDER2/contacts$' "$FAKE_CURL_LOG")"
@@ -318,6 +326,32 @@ eq "duplicates changes nothing" "0" "$(grep -cE '^(POST|PATCH|DELETE) ' "$FAKE_C
 printf '{"value":[%s]}' "$(contact "$(cid DUPONE00000000001AA=)" "Ada Lovelace" "ada@example.com" "A")" > "$FAKE_F1_PAGE1"
 printf '{"value":[]}' > "$FAKE_F2"
 has "duplicates says when there are none" "No likely duplicates found" "$(con duplicates)"
+
+# A mailbox with no subfolders at all keeps every contact in the main folder,
+# which /me/contactFolders never lists. search and duplicates must still see them.
+saved_folders=$(cat "$FAKE_FOLDERS")
+printf '%s' '{"value":[]}' > "$FAKE_FOLDERS"
+printf '{"value":[%s,%s]}' \
+    "$(contact "$(cid MAINONE0000000001AA=)" "Ada Lovelace" "ada@example.com" "A")" \
+    "$(contact "$(cid MAINTWO0000000002AA=)" "Countess Lovelace" "ada@example.com" "B")" > "$FAKE_F1_PAGE1"
+has "search finds a contact in the main folder with no subfolders" "Countess Lovelace" "$(con search countess)"
+has "duplicates sees the main folder with no subfolders" "same email: ada@example.com" "$(con duplicates)"
+
+# Outlook keeps three email slots, so a contact with none set can come back as
+# [{"address":""},...]. Two such contacts are not duplicates of each other.
+printf '{"value":[%s,%s]}' \
+    "$(contact "$(cid BLANKONE000000001AA=)" "Dan Fowler" "" "A")" \
+    "$(contact "$(cid BLANKTWO000000002AA=)" "Bradley Jenkins" "" "B")" > "$FAKE_F1_PAGE1"
+out=$(con duplicates)
+has "blank email slots are not a shared address" "No likely duplicates found" "$out"
+lacks "blank email slots are not listed as an address" ", ," "$(con list)"
+# A mailbox big enough that its contacts pass the 128 KB cap on one argument.
+big=$(jq -nc '[range(0; 600) | {id: ("AAMkBIG" + (tostring) + "xxxxxxxxxxxxxxxxxxxxxxxxxxxx"), displayName: ("Person \(.)"), emailAddresses: [{address: ("p\(.)@example.com")}], companyName: ("Company \(.) with a long enough name to add bulk"), personalNotes: ("x" * 200), categories: [], parentFolderId: "FOLDER1"}] | {value: .}')
+printf '%s' "$big" > "$FAKE_F1_PAGE1"
+out=$(con search "person 599")
+has "search works on a mailbox past the 128 KB argument cap" "Person 599" "$out"
+lacks "search past the cap raises no argument error" "Argument list too long" "$out"
+printf '%s' "$saved_folders" > "$FAKE_FOLDERS"
 
 ########################################
 # A Graph error is reported and the command exits non-zero.

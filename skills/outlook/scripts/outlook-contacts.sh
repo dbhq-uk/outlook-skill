@@ -69,6 +69,8 @@ usage() {
     echo "  --mobile <number>  --phone <number> (same as --mobile)"
     echo "  --business-phone <number>  --home-phone <number>   (repeatable)"
     echo "  --company <text>  --title <text>  --notes <text>"
+    echo "  --street <text>  --town <text>  --postcode <text>  --country <text>"
+    echo "                         (the business address; on update, give every part to keep)"
     echo "  --category <name>      (repeatable; on update they replace the list)"
     echo "  --folder <name|id>     (create only: the folder to create it in)"
     echo "  On update, an empty value (--company \"\") clears that field."
@@ -182,7 +184,9 @@ fetch_all() {
             fi
             return 1
         fi
-        merged=$(jq -n --argjson a "$merged" --argjson b "$(printf '%s' "$page" | jq '.value')" '$a + $b')
+        # Through stdin, not --argjson: one argument is capped at 128 KB on
+        # Linux, and a few hundred contacts pass that.
+        merged=$(printf '%s\n%s' "$merged" "$page" | jq -sc '.[0] + (.[1].value // [])')
         next=$(printf '%s' "$page" | jq -r '."@odata.nextLink" // empty')
         collected=$(printf '%s' "$merged" | jq 'length')
         if [ "$collected" -ge "$max" ]; then
@@ -200,13 +204,20 @@ fetch_all() {
 # load_folders: sets FOLDERS to a JSON array of {id, displayName, path,
 # parentFolderId} for every contact folder, children included. path is
 # "Parent/Child". Loaded once per run.
+#
+# /me/contactFolders lists only the folders inside the main Contacts folder,
+# never the main folder itself, so that one is fetched by its well-known name
+# and put first. Without it a mailbox with no subfolders looks empty to search
+# and duplicates, and nothing can be moved back into the main folder.
 FOLDERS=""
 load_folders() {
     [ -n "$FOLDERS" ] && return 0
-    local top queue='[]' all='[]' id kids path n=0
+    local main top queue='[]' all='[]' id kids path n=0
+    main=$(api_call GET "/me/contactFolders/contacts") || return 1
+    main=$(printf '%s' "$main" | jq -c '[{id, displayName, parentFolderId, path: .displayName}]') || return 1
     top=$(fetch_all "/me/contactFolders?\$top=100") || return 1
-    all=$(printf '%s' "$top" | jq -c 'map({id, displayName, parentFolderId, path: .displayName})')
-    queue="$all"
+    queue=$(printf '%s' "$top" | jq -c 'map({id, displayName, parentFolderId, path: .displayName})')
+    all=$(jq -nc --argjson a "$main" --argjson b "$queue" '$a + $b')
     # Breadth first through the children. The cap stops a runaway tree.
     while [ "$(printf '%s' "$queue" | jq 'length')" -gt 0 ] && [ "$n" -lt 200 ]; do
         id=$(printf '%s' "$queue" | jq -r '.[0].id')
@@ -215,8 +226,8 @@ load_folders() {
         n=$((n + 1))
         kids=$(fetch_all "/me/contactFolders/$id/childFolders?\$top=100") || return 1
         kids=$(printf '%s' "$kids" | jq -c --arg p "$path" 'map({id, displayName, parentFolderId, path: ($p + "/" + .displayName)})')
-        all=$(jq -nc --argjson a "$all" --argjson b "$kids" '$a + $b')
-        queue=$(jq -nc --argjson a "$queue" --argjson b "$kids" '$a + $b')
+        all=$(printf '%s\n%s' "$all" "$kids" | jq -sc '.[0] + .[1]')
+        queue=$(printf '%s\n%s' "$queue" "$kids" | jq -sc '.[0] + .[1]')
     done
     FOLDERS="$all"
 }
@@ -256,7 +267,8 @@ all_contacts() {
     while IFS=$'\t' read -r id path; do
         [ -n "$id" ] || continue
         rows=$(fetch_all "/me/contactFolders/$id/contacts?\$top=100&\$select=$CONTACT_SELECT") || return 1
-        out=$(jq -nc --argjson a "$out" --argjson b "$rows" --arg f "$path" '$a + ($b | map(. + {folder: $f}))')
+        # Through stdin: the list outgrows the 128 KB cap on one argument.
+        out=$(printf '%s\n%s' "$out" "$rows" | jq -sc --arg f "$path" '.[0] + (.[1] | map(. + {folder: $f}))')
     done < <(printf '%s' "$FOLDERS" | jq -r '.[] | [.id, .path] | @tsv')
     printf '%s' "$out"
 }
@@ -309,6 +321,7 @@ resolve_contact_id() {
 # was given, even with an empty value, is "have"; update sends only those.
 F_EMAILS="" F_BUSINESS="" F_HOME="" F_CATS=""
 F_NAME="" F_GIVEN="" F_SURNAME="" F_MOBILE="" F_COMPANY="" F_TITLE="" F_NOTES="" F_FOLDER=""
+F_STREET="" F_TOWN="" F_POSTCODE="" F_COUNTRY="" HAVE_ADDRESS=""
 HAVE_NAME="" HAVE_GIVEN="" HAVE_SURNAME="" HAVE_EMAILS="" HAVE_MOBILE="" HAVE_BUSINESS=""
 HAVE_HOME="" HAVE_COMPANY="" HAVE_TITLE="" HAVE_NOTES="" HAVE_CATS=""
 parse_fields() {
@@ -316,7 +329,7 @@ parse_fields() {
     while [ $# -gt 0 ]; do
         flag="$1"
         case "$flag" in
-            --name|--given|--surname|--email|--mobile|--phone|--business-phone|--home-phone|--company|--title|--notes|--category|--folder)
+            --name|--given|--surname|--email|--mobile|--phone|--business-phone|--home-phone|--company|--title|--notes|--category|--folder|--street|--town|--postcode|--country)
                 if [ $# -lt 2 ]; then
                     echo "Error: $flag needs a value." >&2
                     return 1
@@ -338,6 +351,10 @@ parse_fields() {
             --notes)          F_NOTES="$2"; HAVE_NOTES=1 ;;
             --category)       F_CATS="$F_CATS$2"$'\n'; HAVE_CATS=1 ;;
             --folder)         F_FOLDER="$2" ;;
+            --street)         F_STREET="$2"; HAVE_ADDRESS=1 ;;
+            --town)           F_TOWN="$2"; HAVE_ADDRESS=1 ;;
+            --postcode)       F_POSTCODE="$2"; HAVE_ADDRESS=1 ;;
+            --country)        F_COUNTRY="$2"; HAVE_ADDRESS=1 ;;
         esac
         shift 2
     done
@@ -345,13 +362,17 @@ parse_fields() {
 
 # contact_body: the JSON for create or update from the F_* variables. Only the
 # fields given are in it. An empty --email, --category or phone list entry is
-# dropped, so `--email ""` on update clears the list.
+# dropped, so `--email ""` on update clears the list. The address flags set the
+# whole business address, so an update that gives one of them clears the parts
+# it leaves out.
 contact_body() {
     jq -n \
         --arg name "$F_NAME" --arg given "$F_GIVEN" --arg surname "$F_SURNAME" \
         --arg emails "$F_EMAILS" --arg mobile "$F_MOBILE" --arg business "$F_BUSINESS" \
         --arg home "$F_HOME" --arg company "$F_COMPANY" --arg title "$F_TITLE" \
         --arg notes "$F_NOTES" --arg cats "$F_CATS" \
+        --arg street "$F_STREET" --arg town "$F_TOWN" --arg postcode "$F_POSTCODE" \
+        --arg country "$F_COUNTRY" --arg haddress "$HAVE_ADDRESS" \
         --arg hname "$HAVE_NAME" --arg hgiven "$HAVE_GIVEN" --arg hsurname "$HAVE_SURNAME" \
         --arg hemails "$HAVE_EMAILS" --arg hmobile "$HAVE_MOBILE" --arg hbusiness "$HAVE_BUSINESS" \
         --arg hhome "$HAVE_HOME" --arg hcompany "$HAVE_COMPANY" --arg htitle "$HAVE_TITLE" \
@@ -368,12 +389,13 @@ contact_body() {
         | if $hcompany == "1" then .companyName = $company else . end
         | if $htitle == "1" then .jobTitle = $title else . end
         | if $hnotes == "1" then .personalNotes = $notes else . end
-        | if $hcats == "1" then .categories = ($cats | lines) else . end'
+        | if $hcats == "1" then .categories = ($cats | lines) else . end
+        | if $haddress == "1" then .businessAddress = {street: $street, city: $town, postalCode: $postcode, countryOrRegion: $country} else . end'
 }
 
 # A one-line description of a contact (a JSON object on stdin).
 describe_contact() {
-    jq -r '"\(.displayName // "(no name)") <\([.emailAddresses[]?.address] | join(", "))>" | sub(" <>$"; "")'
+    jq -r '"\(.displayName // "(no name)") <\([.emailAddresses[]?.address | select((. // "") != "")] | join(", "))>" | sub(" <>$"; "")'
 }
 
 # Remove what Graph sets itself, and the nulls, so a contact read back can be
@@ -641,9 +663,9 @@ case "$1" in
         report=$(printf '%s' "$contacts" | jq -r '
             def short_id: .[-20:];
             def norm_name: ascii_downcase | gsub("[^a-z0-9 ]"; " ") | split(" ") | map(select(length > 0)) | sort | join(" ");
-            def row: "    \(.id | short_id) | \(.displayName // "(no name)") | \([.emailAddresses[]?.address] | join(", ") | if . == "" then "-" else . end) | \(.folder // "-")";
+            def row: "    \(.id | short_id) | \(.displayName // "(no name)") | \([.emailAddresses[]?.address | select((. // "") != "")] | join(", ") | if . == "" then "-" else . end) | \(.folder // "-")";
             . as $all
-            | ([$all[] | . as $c | (.emailAddresses // [])[] | {key: (.address | ascii_downcase), c: $c}]
+            | ([$all[] | . as $c | (.emailAddresses // [])[] | select((.address // "") != "") | {key: (.address | ascii_downcase), c: $c}]
                | group_by(.key) | map({kind: "email", key: .[0].key, members: (map(.c) | unique_by(.id))})) as $byemail
             | ([$all[] | select((.displayName // "") != "") | {key: (.displayName | norm_name), c: .}]
                | map(select(.key != "")) | group_by(.key)
