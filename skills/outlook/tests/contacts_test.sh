@@ -344,7 +344,10 @@ printf '{"value":[%s,%s]}' \
     "$(contact "$(cid BLANKTWO000000002AA=)" "Bradley Jenkins" "" "B")" > "$FAKE_F1_PAGE1"
 out=$(con duplicates)
 has "blank email slots are not a shared address" "No likely duplicates found" "$out"
+# Outlook returns all three slots, so three blank addresses must not print as ", ,".
+printf '{"value":[{"id":"%s","displayName":"Three Blanks","emailAddresses":[{"address":""},{"address":""},{"address":""}],"categories":[],"parentFolderId":"FOLDER1"}]}' "$(cid THREEBLANK0000001AA=)" > "$FAKE_F1_PAGE1"
 lacks "blank email slots are not listed as an address" ", ," "$(con list)"
+has "a contact with only blank email slots shows no address" "Three Blanks | - |" "$(con list)"
 # A mailbox big enough that its contacts pass the 128 KB cap on one argument.
 big=$(jq -nc '[range(0; 600) | {id: ("AAMkBIG" + (tostring) + "xxxxxxxxxxxxxxxxxxxxxxxxxxxx"), displayName: ("Person \(.)"), emailAddresses: [{address: ("p\(.)@example.com")}], companyName: ("Company \(.) with a long enough name to add bulk"), personalNotes: ("x" * 200), categories: [], parentFolderId: "FOLDER1"}] | {value: .}')
 printf '%s' "$big" > "$FAKE_F1_PAGE1"

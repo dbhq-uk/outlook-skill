@@ -310,7 +310,7 @@ format_contacts() {
             ([.[].id | short_id] | group_by(.) | map(select(length > 1) | .[0])) as $clash
             | to_entries[] | .key as $i | .value as $c
             | ($c.id | short_id) as $s
-            | "[\($i + 1)] \(if ($clash | index($s)) then $c.id else $s end) | \($c.displayName // "(no name)") | \([$c.emailAddresses[]?.address] | join(", ") | if . == "" then "-" else . end) | \([$c.mobilePhone, ($c.businessPhones // [])[], ($c.homePhones // [])[], $c.otherPhone] | map(select(. != null and . != "")) | join(", ") | if . == "" then "-" else . end) | \($c.companyName // "-") | \(($c.categories // []) | join(", ") | if . == "" then "-" else . end) | \($c.folder // "-")"
+            | "[\($i + 1)] \(if ($clash | index($s)) then $c.id else $s end) | \($c.displayName // "(no name)") | \([$c.emailAddresses[]?.address | select((. // "") != "")] | join(", ") | if . == "" then "-" else . end) | \([$c.mobilePhone, ($c.businessPhones // [])[], ($c.homePhones // [])[], $c.otherPhone] | map(select(. != null and . != "")) | join(", ") | if . == "" then "-" else . end) | \($c.companyName // "-") | \(($c.categories // []) | join(", ") | if . == "" then "-" else . end) | \($c.folder // "-")"
         end'
 }
 
