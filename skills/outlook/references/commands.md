@@ -3,8 +3,8 @@
 The full syntax of every command. `SKILL.md` holds the rules and a one-line index; read this
 file when you need the exact arguments or the behaviour behind a command.
 
-`$M` below is `scripts/outlook-mail.sh`, `$C` is `scripts/outlook-calendar.sh`, `$T` is
-`scripts/outlook-token.sh` and `$S` is `scripts/outlook-setup.sh`, all in this skill's
+`$M` below is `scripts/outlook-mail.sh`, `$C` is `scripts/outlook-calendar.sh`, `$K` is
+`scripts/outlook-contacts.sh`, `$T` is `scripts/outlook-token.sh` and `$S` is `scripts/outlook-setup.sh`, all in this skill's
 directory: use the full paths SKILL.md gives. Every command takes `--account <name>`
 (or `-a <name>`) before the verb; otherwise `OUTLOOK_ACCOUNT`, then `default`.
 
@@ -239,6 +239,60 @@ $C delete <event-id>                                          # removes it; noti
   user the change and that list, then run it again with `--notify-attendees` once they approve.
 - `delete` refuses a meeting you organise, because Graph would send a cancellation. Use
   `cancel` for that.
+
+## Contacts
+
+Over `/me/contacts` and `/me/contactFolders`. Needs the `Contacts.ReadWrite` permission, which
+accounts set up before contacts existed have not granted. `$K` refuses with the sign-in command
+until they have: `outlook-setup.sh --account <name>`, answering `y` to "Overwrite?". Mail and
+calendar do not need it. Nothing here sends mail, so there is no send gate.
+
+Listings print a short ID (the last 20 characters) that every command accepts. A short ID that
+matches two contacts is refused, and the full ID is printed instead.
+
+```bash
+$K list [--folder <name|id>] [--top N] [--sort name|company|modified]   # default 50, main Contacts folder, by name
+$K search <text>        # name, email or company, in every folder, ignoring case
+$K get <id>             # all of Graph's fields, as JSON, plus otherPhone
+$K folders              # every contact folder, children as Parent/Child, with IDs
+$K duplicates           # read-only: contacts sharing an email address, a name (word order ignored) or a phone number
+```
+
+```bash
+$K create --name "Ada Lovelace" --email ada@example.com --email ada@example.org \
+    --mobile "+44 7700 900000" --business-phone "01632 960000" --home-phone "01632 960001" --other-phone "01632 960002" \
+    --company "Analytical Co" --title "Engineer" --notes "Met at a talk" \
+    --category Blue --category Clients [--folder <name|id>] \
+    [--street "1 High Street" --town Exampletown --postcode "AB1 2CD" --country "United Kingdom"]
+$K update <id> --company "New Co" --email new@example.com
+$K delete <id>
+$K move <id> --folder <name|id>
+$K folder-create <name> [--parent <name|id>]
+$K categorise <id> --add <category> | --remove <category>
+```
+
+- `create` needs at least one of `--name`, `--given`, `--surname` or `--email`. A bare `--name
+  "Ada Lovelace"` also sets the first and last name. `--phone` is the same as `--mobile`.
+- `update` sends only the flags given. `--email`, `--business-phone`, `--home-phone` and
+  `--category` replace the whole list. An empty value (`--company ""`) clears a field. To change
+  folder use `move`.
+- Listings print one row per contact: `[n] id | name | emails | phones | company | categories |
+  folder`. `phones` is mobile first, then business, home and Other, joined with `, `, or `-` when
+  there are none, for example `07700 900123, 01632 960000`.
+- The Other phone is not a field of Graph's contact resource. It is the MAPI property
+  `String 0x3A1F`, which every read expands and shows as `otherPhone`. `--other-phone <number>`
+  writes it on `create` and `update`, `--other-phone ""` clears it, and `move` carries it across.
+  `duplicates` compares phone numbers by their digits, so `07700 900123` matches `+44 7700 900123`.
+- `delete` prints the name and addresses of what it deleted.
+- `move` has no Graph call behind it: it copies the contact into the target folder and deletes the
+  original only once the copy exists. If the copy fails, the original is untouched. The new ID is
+  printed. A contact photo and attachments are not copied.
+- `categorise` sets the contact's own category list, case-insensitively, without duplicates. A
+  name outside the master list (see `$M categories`) still works but shows without a colour; the
+  command says so when it can read the master list.
+- A folder is given by name (ignoring case), by `Parent/Child` path or by ID. A name that matches
+  two folders is refused.
+- `duplicates` and `search` read every folder, so they page through the whole address book.
 
 ## Tokens and accounts
 

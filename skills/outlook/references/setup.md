@@ -42,6 +42,7 @@ A public client needs none. Skip **Certificates & secrets**.
    - `Mail.ReadWrite`
    - `Mail.Send`
    - `Calendars.ReadWrite`
+   - `Contacts.ReadWrite`
    - `offline_access`
    - `User.Read`
 5. Click **Add permissions**
@@ -72,7 +73,7 @@ Create `~/.dbhq/outlook/config.json`:
     "client_id": "YOUR_APPLICATION_ID",
     "tenant": "common",
     "redirect_uri": "https://login.microsoftonline.com/common/oauth2/nativeclient",
-    "scope": "offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read"
+    "scope": "offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite Contacts.ReadWrite User.Read"
 }
 ```
 
@@ -89,7 +90,7 @@ Sign-in uses PKCE: make a random verifier, and send only its SHA-256 to the brow
 ```bash
 VERIFIER=$(LC_ALL=C tr -dc 'A-Za-z0-9._~-' < /dev/urandom | head -c 64)
 CHALLENGE=$(printf '%s' "$VERIFIER" | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
-echo "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=YOUR_CLIENT_ID&response_type=code&redirect_uri=https%3A%2F%2Flogin.microsoftonline.com%2Fcommon%2Foauth2%2Fnativeclient&scope=offline_access%20Mail.ReadWrite%20Mail.Send%20Calendars.ReadWrite%20User.Read&code_challenge=$CHALLENGE&code_challenge_method=S256"
+echo "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=YOUR_CLIENT_ID&response_type=code&redirect_uri=https%3A%2F%2Flogin.microsoftonline.com%2Fcommon%2Foauth2%2Fnativeclient&scope=offline_access%20Mail.ReadWrite%20Mail.Send%20Calendars.ReadWrite%20Contacts.ReadWrite%20User.Read&code_challenge=$CHALLENGE&code_challenge_method=S256"
 ```
 
 1. Open that URL in your browser, in the same shell session so `$VERIFIER` is kept
@@ -112,7 +113,7 @@ curl -X POST "https://login.microsoftonline.com/common/oauth2/v2.0/token" \
   --data-urlencode "code_verifier=$VERIFIER" \
   --data-urlencode "redirect_uri=https://login.microsoftonline.com/common/oauth2/nativeclient" \
   -d "grant_type=authorization_code" \
-  --data-urlencode "scope=offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read" \
+  --data-urlencode "scope=offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite Contacts.ReadWrite User.Read" \
   > ~/.dbhq/outlook/credentials.json
 
 chmod 600 ~/.dbhq/outlook/credentials.json

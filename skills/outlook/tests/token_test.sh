@@ -10,7 +10,11 @@
 # What this pins: a failed refresh never changes credentials.json (the bug that
 # emptied it and lost the refresh token), a good refresh keeps the old refresh
 # token when Microsoft sends no new one, the 60-second expiry margin, and the
-# lock that stops two commands refreshing the same account at once.
+# lock that stops two commands refreshing the same account at once. It also pins
+# the scope a refresh asks for: the one credentials.json says was granted (so an
+# install made before contacts existed is never asked for a scope it has not
+# consented to), the legacy scopes when the file does not say, and always
+# offline_access.
 #
 # The fake curl reads FAKE_CURL_MODE and FAKE_CURL_LOG from the environment
 # (SC2030/SC2031 are about the per-test subshell exports, which is intended).
@@ -50,6 +54,7 @@ case "$url" in
       invalid_grant) printf '{"error":"invalid_grant","error_description":"AADSTS700082: The refresh token has expired."}'; exit 22 ;;
       noaccess)     printf '{"token_type":"Bearer","expires_in":3600}'; exit 0 ;;
       ok)           printf '{"token_type":"Bearer","access_token":"new-access","refresh_token":"new-refresh","expires_in":3600}'; exit 0 ;;
+      ok_scope)     printf '{"token_type":"Bearer","access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"scope":"https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Contacts.ReadWrite"}'; exit 0 ;;
       ok_norefresh) printf '{"token_type":"Bearer","access_token":"new-access","expires_in":"3599"}'; exit 0 ;;
     esac
     ;;
@@ -304,6 +309,71 @@ write_creds "$far"
 ln -s "$SCRIPTS/outlook-token.sh" "$TMP/bin/linked-token"
 eq "a symlinked script still finds lib/graph.sh" "old-access" \
    "$(run_cli bash "$TMP/bin/linked-token" get 2>&1)"
+
+########################################
+# The scope a refresh asks for.
+########################################
+write_scope_creds() {  # write_scope_creds <scope or "-" for none>
+    if [ "$1" = "-" ]; then
+        printf '%s' '{"access_token":"old-access","refresh_token":"old-refresh","expires_at":0}' > "$CREDS_FILE"
+    else
+        jq -n --arg s "$1" '{access_token: "old-access", refresh_token: "old-refresh", expires_at: 0, scope: $s}' > "$CREDS_FILE"
+    fi
+}
+requested_scope() { grep -- '^scope=' "$FAKE_CURL_LOG" | head -1 | sed 's/^scope=//'; }
+
+LEGACY="offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read"
+
+write_scope_creds "Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read"; : > "$FAKE_CURL_LOG"
+FAKE_CURL_MODE=ok refresh_access_token >/dev/null 2>&1
+eq "refresh asks for the granted scope, with offline_access added" "$LEGACY" "$(requested_scope)"
+eq "refresh for a credential without contacts does not ask for Contacts.ReadWrite" "0" \
+   "$(requested_scope | grep -c 'Contacts.ReadWrite')"
+
+write_scope_creds "offline_access Mail.ReadWrite Contacts.ReadWrite User.Read"; : > "$FAKE_CURL_LOG"
+FAKE_CURL_MODE=ok refresh_access_token >/dev/null 2>&1
+eq "refresh asks for Contacts.ReadWrite when it was granted" "offline_access Mail.ReadWrite Contacts.ReadWrite User.Read" "$(requested_scope)"
+
+write_scope_creds "https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Contacts.ReadWrite"; : > "$FAKE_CURL_LOG"
+FAKE_CURL_MODE=ok refresh_access_token >/dev/null 2>&1
+eq "refresh strips the URL form and adds offline_access" "offline_access Mail.ReadWrite Contacts.ReadWrite" "$(requested_scope)"
+
+write_scope_creds "Mail.ReadWrite offline_access Mail.ReadWrite"; : > "$FAKE_CURL_LOG"
+FAKE_CURL_MODE=ok refresh_access_token >/dev/null 2>&1
+eq "refresh asks for offline_access once, first, and no repeats" "offline_access Mail.ReadWrite" "$(requested_scope)"
+
+write_scope_creds "-"; : > "$FAKE_CURL_LOG"
+FAKE_CURL_MODE=ok refresh_access_token >/dev/null 2>&1
+eq "refresh falls back to the legacy scope when credentials.json has none" "$LEGACY" "$(requested_scope)"
+eq "the legacy fallback has no Contacts.ReadWrite" "0" "$(requested_scope | grep -c 'Contacts.ReadWrite')"
+
+write_scope_creds ""; : > "$FAKE_CURL_LOG"
+FAKE_CURL_MODE=ok refresh_access_token >/dev/null 2>&1
+eq "refresh falls back to the legacy scope when the scope is empty" "$LEGACY" "$(requested_scope)"
+
+jq -n '{access_token: "old-access", refresh_token: "old-refresh", expires_at: 0, scope: 7}' > "$CREDS_FILE"; : > "$FAKE_CURL_LOG"
+FAKE_CURL_MODE=ok refresh_access_token >/dev/null 2>&1
+eq "refresh falls back to the legacy scope when the scope is not text" "$LEGACY" "$(requested_scope)"
+
+write_scope_creds "offline_access Mail.ReadWrite Contacts.ReadWrite"
+FAKE_CURL_MODE=ok refresh_access_token >/dev/null 2>&1
+eq "a response with no scope keeps the scope that was granted" "offline_access Mail.ReadWrite Contacts.ReadWrite" "$(jq -r .scope "$CREDS_FILE")"
+write_scope_creds "offline_access Mail.ReadWrite Contacts.ReadWrite"
+FAKE_CURL_MODE=ok_scope refresh_access_token >/dev/null 2>&1
+eq "a response with a scope replaces it" "https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Contacts.ReadWrite" "$(jq -r .scope "$CREDS_FILE")"
+
+# outlook_scope_granted
+write_scope_creds "https://graph.microsoft.com/Contacts.ReadWrite"
+eq "outlook_scope_granted finds a scope returned as a URL" "yes" "$(outlook_scope_granted Contacts.ReadWrite && echo yes || echo no)"
+eq "outlook_scope_granted ignores case" "yes" "$(outlook_scope_granted contacts.readwrite && echo yes || echo no)"
+write_scope_creds "-"
+eq "outlook_scope_granted is no for a credential with no scope field" "no" "$(outlook_scope_granted Contacts.ReadWrite && echo yes || echo no)"
+eq "outlook_scope_granted is yes for a legacy scope it has" "yes" "$(outlook_scope_granted Mail.ReadWrite && echo yes || echo no)"
+write_scope_creds "Mail.ReadWrite"
+eq "outlook_scope_granted is no for a scope not granted" "no" "$(outlook_scope_granted Contacts.ReadWrite && echo yes || echo no)"
+eq "sign-in asks for Contacts.ReadWrite" "1" "$(printf '%s' "$OUTLOOK_SCOPE" | grep -c 'Contacts.ReadWrite')"
+eq "the legacy scope has no Contacts.ReadWrite" "0" "$(printf '%s' "$OUTLOOK_LEGACY_SCOPE" | grep -c 'Contacts.ReadWrite')"
+eq "the authorize URL carries Contacts.ReadWrite" "1" "$(outlook_authorize_url cid chal st | grep -c 'Contacts.ReadWrite')"
 
 echo "-----------------------------"
 printf 'PASS=%d FAIL=%d\n' "$PASS" "$FAIL"

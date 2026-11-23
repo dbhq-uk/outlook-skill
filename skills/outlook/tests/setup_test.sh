@@ -121,6 +121,11 @@ has "fresh: the app is registered with a public-client redirect URI" "--public-c
 has "fresh: public client flows are allowed" "--is-fallback-public-client true" "$create"
 hasnt "fresh: the app has no web redirect URI" "--web-redirect-uris" "$create"
 eq "fresh: no client secret is created" "0" "$(grep -c 'credential reset' "$FAKE_AZ_LOG" || true)"
+eq "fresh: Contacts.ReadWrite is added to the app, by its Graph permission ID" "1" \
+   "$(grep -c 'permission add .*--api-permissions d56682ec-c09e-4743-aaf4-1a3aac4caa21=Scope' "$FAKE_AZ_LOG" || true)"
+eq "fresh: sign-in asks for Contacts.ReadWrite" "1" "$(url_param scope | grep -c 'Contacts.ReadWrite')"
+eq "fresh: the token exchange asks for Contacts.ReadWrite" "1" "$(token_field scope | grep -c 'Contacts.ReadWrite')"
+eq "fresh: config.json records Contacts.ReadWrite in its scope" "1" "$(jq -r .scope "$CFG" | grep -c 'Contacts.ReadWrite')"
 eq "fresh: the sign-in uses PKCE with S256" "S256" "$(url_param code_challenge_method)"
 verifier=$(token_field code_verifier)
 eq "fresh: the verifier is 64 characters" "64" "${#verifier}"
@@ -212,6 +217,8 @@ legacy_config "$H" default legacy-app-id
 FAKE_AZ_EXISTING=legacy-app-id run_setup "$H" default y Y
 eq "by name: setup exits 0" "0" "$rc"
 eq "by name: the found app is converted" "1" "$(grep -c '^az rest --method PATCH' "$FAKE_AZ_LOG" || true)"
+eq "by name: Contacts.ReadWrite is added to the found app" "1" \
+   "$(grep -c 'permission add .*--api-permissions d56682ec-c09e-4743-aaf4-1a3aac4caa21=Scope' "$FAKE_AZ_LOG" || true)"
 eq "by name: no new app is created" "0" "$(grep -c '^az ad app create' "$FAKE_AZ_LOG" || true)"
 eq "by name: config.json drops the secret" "false" "$(jq 'has("client_secret")' "$H/.dbhq/outlook/default/config.json")"
 

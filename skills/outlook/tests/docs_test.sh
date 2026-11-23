@@ -67,11 +67,11 @@ verbs_of() {  # the verbs in a script's top-level case: lines like "    verb)"
 }
 documented() {  # documented <script> <verb>
     local v="$2" pat
-    pat="\`${v}[\` ]|[$][MCT] $v( |$)|$1 $v( |$)"
+    pat="\`${v}[\` ]|[$][MCTK] $v( |$)|$1 $v( |$)"
     grep -qE -- "$pat" "$SKILL" "$COMMANDS"
 }
 count=0
-for script in outlook-mail outlook-calendar outlook-token; do
+for script in outlook-mail outlook-calendar outlook-contacts outlook-token; do
     verbs=$(verbs_of "$SKILL_DIR/scripts/$script.sh")
     [ "$script" = outlook-token ] && verbs="$verbs list"
     for v in $verbs; do

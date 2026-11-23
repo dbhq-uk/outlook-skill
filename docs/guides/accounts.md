@@ -89,8 +89,8 @@ desktop applications** platform.
 redirect URI to **Mobile and desktop applications** and set **Allow public client flows** to
 Yes.
 
-**"Insufficient privileges".** The five delegated permissions - `Mail.ReadWrite`, `Mail.Send`,
-`Calendars.ReadWrite`, `User.Read`, `offline_access` - are not all present or not all
+**"Insufficient privileges".** The six delegated permissions - `Mail.ReadWrite`, `Mail.Send`,
+`Calendars.ReadWrite`, `Contacts.ReadWrite`, `User.Read`, `offline_access` - are not all present or not all
 consented. Add them, then sign out and in again to re-consent.
 
 **Markdown commands failing.** `mddraft`, `mdreply`, `forward`, `followup` and `update mdbody`

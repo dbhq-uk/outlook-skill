@@ -23,13 +23,50 @@
 OUTLOOK_TOKEN_URL="https://login.microsoftonline.com/common/oauth2/v2.0/token"
 OUTLOOK_AUTHORIZE_URL="https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
 OUTLOOK_REDIRECT_URI="https://login.microsoftonline.com/common/oauth2/nativeclient"
-OUTLOOK_SCOPE="offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read"
+# What sign-in asks for. Contacts.ReadWrite arrived after the first release, so
+# an install made before it has not consented to it.
+OUTLOOK_SCOPE="offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite Contacts.ReadWrite User.Read"
+
+# What every install had before contacts. A refresh falls back to this when
+# credentials.json does not say what was granted.
+OUTLOOK_LEGACY_SCOPE="offline_access Mail.ReadWrite Mail.Send Calendars.ReadWrite User.Read"
 
 # A token is used until it is within this many seconds of expiry.
 OUTLOOK_TOKEN_MARGIN=60
 
 # How long to wait for another command that is refreshing the same account.
 OUTLOOK_TOKEN_LOCK_WAIT="${OUTLOOK_TOKEN_LOCK_WAIT:-30}"
+
+# Print the scopes this account has actually been granted, space separated, as
+# the token response saved in credentials.json reports them. A refresh must ask
+# for these and no more: asking for a scope the user never consented to makes
+# Microsoft refuse the refresh, which would break mail and calendar for every
+# install made before contacts existed.
+#
+# Microsoft may return scopes as full URLs (https://graph.microsoft.com/
+# Mail.ReadWrite), so the prefix is dropped. It may also leave offline_access
+# out of the returned list, and without it in the request the refresh token is
+# not renewed, so offline_access is always first. A missing or empty scope
+# field gives the legacy scopes.
+outlook_granted_scope() {
+    local granted
+    granted=$(jq -r '
+        (.scope // "") | (if type == "string" then . else "" end) | gsub(","; " ")
+        | [splits("\\s+") | select(length > 0) | sub("^https://graph\\.microsoft\\.com/"; "")]
+        | map(select(ascii_downcase != "offline_access"))
+        | reduce .[] as $s ([]; if any(.[]; ascii_downcase == ($s | ascii_downcase)) then . else . + [$s] end)
+        | if length == 0 then empty else (["offline_access"] + .) | join(" ") end
+    ' "$CREDS_FILE" 2>/dev/null) || granted=""
+    if [ -z "$granted" ]; then
+        granted="$OUTLOOK_LEGACY_SCOPE"
+    fi
+    printf '%s\n' "$granted"
+}
+
+# outlook_scope_granted <scope>: 0 if this account has been granted that scope.
+outlook_scope_granted() {
+    outlook_granted_scope | tr ' ' '\n' | grep -qixF -- "$1"
+}
 
 # Print the stored access token if it is still good for more than the margin.
 # Returns 1, printing nothing, when it is missing, expired or about to expire.
@@ -72,11 +109,14 @@ _outlook_with_token_lock() {
 #   - curl runs with --fail-with-body and timeouts, so an HTTP error or a
 #     stalled connection is a failure rather than an empty "success";
 #   - nothing is written unless the response is JSON with an access_token;
-#   - the old refresh_token is kept when the response does not carry a new one;
+#   - the old refresh_token is kept when the response does not carry a new one,
+#     and so is the scope, so what was granted is not forgotten;
+#   - the scope asked for is what credentials.json says was granted (see
+#     outlook_granted_scope), never more;
 #   - the new file is written beside the old one and renamed into place, so a
 #     reader sees the old file or the new one, never a half-written one.
 _outlook_refresh_unlocked() {
-    local refresh_token client_id client_secret now response rc err tmp
+    local refresh_token client_id client_secret now response rc err tmp scope
 
     refresh_token=$(jq -r '.refresh_token // empty' "$CREDS_FILE" 2>/dev/null) || refresh_token=""
     if [ -z "$refresh_token" ]; then
@@ -94,6 +134,7 @@ _outlook_refresh_unlocked() {
     local secret_arg=()
     [ -n "$client_secret" ] && secret_arg=(--data-urlencode "client_secret=$client_secret")
 
+    scope=$(outlook_granted_scope)
     now=$(date +%s)
     response=$(curl -sS --fail-with-body --connect-timeout 10 --max-time 60 \
         -X POST "$OUTLOOK_TOKEN_URL" \
@@ -102,7 +143,7 @@ _outlook_refresh_unlocked() {
         ${secret_arg[@]+"${secret_arg[@]}"} \
         --data-urlencode "refresh_token=$refresh_token" \
         --data-urlencode "grant_type=refresh_token" \
-        --data-urlencode "scope=$OUTLOOK_SCOPE") && rc=0 || rc=$?
+        --data-urlencode "scope=$scope") && rc=0 || rc=$?
 
     if ! printf '%s' "$response" \
          | jq -e 'type == "object" and (.access_token | type == "string" and length > 0)' \
@@ -131,9 +172,10 @@ _outlook_refresh_unlocked() {
     fi
     chmod 600 "$tmp" 2>/dev/null || true
     if ! printf '%s' "$response" \
-         | jq --argjson now "$now" --arg rt "$refresh_token" '
+         | jq --argjson now "$now" --arg rt "$refresh_token" --arg sc "$scope" '
              . + {expires_at: ($now + ((.expires_in | tonumber?) // 3600))}
              | if ((.refresh_token // "") | length) == 0 then .refresh_token = $rt else . end
+             | if ((.scope // "") | length) == 0 then .scope = $sc else . end
            ' > "$tmp" 2>/dev/null \
        || ! mv -f "$tmp" "$CREDS_FILE" 2>/dev/null; then
         rm -f "$tmp"

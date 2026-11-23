@@ -84,7 +84,7 @@ jobs:
           ln -sf /bin/bash "$RUNNER_TEMP/bash32/bash"
           export PATH="$RUNNER_TEMP/bash32:$PATH"
           fail=0
-          for t in helpers_test calendar_test graph_test token_test; do
+          for t in helpers_test calendar_test contacts_test graph_test token_test; do
             echo "::group::$t"
             /bin/bash "skills/outlook/tests/$t.sh" || fail=1
             echo "::endgroup::"
@@ -93,7 +93,9 @@ jobs:
 
   outlook-to-md:
     name: outlook-to-md (py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to 26.04, which setup-python has no 3.9 build for, so
+    # the 3.9 floor runs on the last image that does. The rest stay on latest.
+    runs-on: ${{ matrix.python-version == '3.9' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:

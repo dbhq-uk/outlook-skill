@@ -4,7 +4,7 @@ Guidance for AI agents (and people) working in this repository.
 
 ## What this is
 
-The **Outlook** skill for AI coding agents - Microsoft 365 email and calendar via the Microsoft Graph API. It follows the [Agent Skills](https://agentskills.io) layout (`skills/<name>/SKILL.md`) and ships as a [Claude Code plugin](https://code.claude.com/docs/en/plugins).
+The **Outlook** skill for AI coding agents - Microsoft 365 email, calendar and contacts via the Microsoft Graph API. It follows the [Agent Skills](https://agentskills.io) layout (`skills/<name>/SKILL.md`) and ships as a [Claude Code plugin](https://code.claude.com/docs/en/plugins).
 
 ## Layout
 
@@ -12,7 +12,7 @@ The **Outlook** skill for AI coding agents - Microsoft 365 email and calendar vi
 .claude-plugin/plugin.json        # plugin manifest
 .github/workflows/validate.yml    # CI: parse, unit tests, frontmatter, py matrix, macOS
 hooks/                            # Claude Code send gap: PreToolUse hook, ask rules, their installer
-skills/outlook/SKILL.md     # the live mail/calendar skill (agent-facing)
+skills/outlook/SKILL.md     # the live mail/calendar/contacts skill (agent-facing)
 skills/outlook/scripts/     # bash scripts (jq + curl + az)
 skills/outlook/scripts/lib/ # graph.sh: token code shared by the scripts, sourced not run
 skills/outlook/references/  # commands.md (full command reference) and setup.md (manual setup); ship with the skill
@@ -47,6 +47,13 @@ installed - so a fact needed at runtime belongs in the skill, not only in `docs/
 - `SKILL.md` loads in full on every trigger, so it keeps to the rules and a one-line command
   index, under 1,500 words. The full syntax goes in `references/commands.md`. A new verb needs
   a line in one of them; `docs_test.sh` fails otherwise.
+- **A refresh asks only for scopes the user has granted.** `_outlook_refresh_unlocked` reads them
+  from `scope` in `credentials.json` (`outlook_granted_scope` in `lib/graph.sh`), falling back to
+  `OUTLOOK_LEGACY_SCOPE`, and always adds `offline_access`. Never make it send `OUTLOOK_SCOPE`
+  (the sign-in list): Microsoft refuses a scope that was never consented to, and that would break
+  every install made before the scope was added. A new scope therefore goes in `OUTLOOK_SCOPE`,
+  `outlook-setup.sh` (with its Graph permission ID) and the docs, and the script that needs it
+  checks `outlook_scope_granted` first and tells the user to sign in again.
 - House style: British English, plain hyphens.
 
 ## Validating a change
@@ -57,6 +64,7 @@ shellcheck skills/outlook/scripts/*.sh # lint (warnings should be clean)
 bash skills/outlook/tests/helpers_test.sh  # offline unit tests (no account needed)
 bash skills/outlook/tests/token_test.sh    # token refresh against a fake curl
 bash skills/outlook/tests/calendar_test.sh # calendar verbs against a fake curl
+bash skills/outlook/tests/contacts_test.sh # contacts verbs, the missing-scope refusal and move, against a fake curl
 bash skills/outlook/tests/mail_test.sh     # draft From, send summary, reply-all and the chain marker, against a fake curl
 bash skills/outlook/tests/chain_marker_test.sh # the live chain marker check, against a fake Exchange
 bash skills/outlook/tests/move_id_test.sh  # the live move ID check, against a fake Exchange

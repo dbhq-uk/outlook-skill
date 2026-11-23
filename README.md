@@ -17,8 +17,9 @@ A free, open-source tool by [DBHQ](https://dbhq.uk) - documented at [skills.dbhq
 ---
 
 Read your inbox, draft and send properly formatted replies and forwards, triage with flags and
-categories, manage attachments up to 150 MB, and run your calendar - including responding to
-invites and inviting attendees - all from Claude Code or Codex, in plain language.
+categories, manage attachments up to 150 MB, run your calendar - including responding to
+invites and inviting attendees - and keep your contacts tidy, all from Claude Code or Codex,
+in plain language.
 Multi-account, OAuth-based, and built with the safety rails that matter for real
 correspondence.
 
@@ -26,7 +27,7 @@ Two skills ship in this pack:
 
 | Skill | What it does | Needs |
 |---|---|---|
-| **`outlook`** | Live Microsoft 365 mail and calendar via the Graph API | OAuth, network |
+| **`outlook`** | Live Microsoft 365 mail, calendar and contacts via the Graph API | OAuth, network |
 | **`outlook-to-md`** | Turns PST exports and live mail into integrity-verified markdown, offline | Nothing but a file |
 
 They cover the two halves of the same problem: the mail you are handling now, and the mail you
@@ -64,10 +65,15 @@ timezone it tells you about rather than assumes.
 Aptos font stack and inline styles - including per-paragraph margins - that survive Outlook's
 rendering.
 
-**It asks for five permissions and no more.** `Mail.ReadWrite`, `Mail.Send`,
-`Calendars.ReadWrite`, `User.Read`, `offline_access`, all delegated. Nothing tenant-wide and
+**It asks for six permissions and no more.** `Mail.ReadWrite`, `Mail.Send`,
+`Calendars.ReadWrite`, `Contacts.ReadWrite`, `User.Read`, `offline_access`, all delegated. Nothing tenant-wide and
 nothing that can reach another mailbox. Whether you can consent to them yourself depends on your
 tenant: many organisations let users approve these, and many require an admin to.
+
+**Contacts need one fresh sign-in on an existing install.** `Contacts.ReadWrite` came after the
+first release. Mail and calendar keep working without it, and a token refresh never asks for a
+permission you have not granted. To use contacts, run `outlook-setup.sh --account <name>` once
+more and answer `y` when it asks to overwrite.
 
 ## What it covers
 
@@ -82,6 +88,9 @@ outlook-mail.sh      inbox · unread · focused · sent · drafts · flagged · 
 
 outlook-calendar.sh  events · today · week · day · search · read · calendars
                            create · invite · quick · update · respond · cancel · delete · free
+
+outlook-contacts.sh  list · search · get · folders · duplicates
+                           create · update · delete · move · folder-create · categorise
 
 outlook-token.sh     refresh · get · test · status · list
 

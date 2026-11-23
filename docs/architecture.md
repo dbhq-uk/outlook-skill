@@ -37,8 +37,16 @@ stopped them all on the same day. Tokens live under `~/.dbhq/outlook/<account>/`
 themselves when a command needs it. A refresh that fails leaves the stored tokens exactly as
 they were, so a network blip never costs you the sign-in.
 
-Five scopes are requested and no more: `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`,
-`User.Read`, `offline_access`.
+Six scopes are requested at sign-in and no more: `Mail.ReadWrite`, `Mail.Send`,
+`Calendars.ReadWrite`, `Contacts.ReadWrite`, `User.Read`, `offline_access`.
+
+A refresh asks only for the scopes `credentials.json` says were granted (`scope` in the saved
+token response), with `offline_access` always added and any `https://graph.microsoft.com/`
+prefix removed. It falls back to the five scopes every install had before contacts when that
+field is missing. Microsoft refuses a refresh that asks for a scope the user never consented to,
+so a refresh that always asked for the newest list would have broken mail and calendar on every
+existing install. `outlook-contacts.sh` checks the granted scope first and, if contacts are not
+granted, tells the user to sign in again.
 
 ### The scope that was deliberately left out
 

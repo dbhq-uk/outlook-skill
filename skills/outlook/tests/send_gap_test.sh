@@ -26,6 +26,7 @@ TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS="$(cd "$TESTS_DIR/../scripts" && pwd)"
 MAIL="$SCRIPTS/outlook-mail.sh"
 CAL="$SCRIPTS/outlook-calendar.sh"
+CON="$SCRIPTS/outlook-contacts.sh"
 
 PASS=0; FAIL=0
 eq() { if [ "$2" = "$3" ]; then PASS=$((PASS+1)); printf 'ok   - %s\n' "$1";
@@ -74,8 +75,8 @@ ACC="$FIX_HOME/.dbhq/outlook/default"
 mkdir -p "$ACC"
 chmod 700 "$FIX_HOME/.dbhq" "$FIX_HOME/.dbhq/outlook" "$ACC"
 printf '%s' '{"client_id":"c","client_secret":"s"}' > "$ACC/config.json"
-fresh_token()   { printf '{"access_token":"tok","refresh_token":"r","expires_at":%s}' "$(( $(date +%s) + 3600 ))" > "$ACC/credentials.json"; }
-expired_token() { printf '{"access_token":"tok","refresh_token":"r","expires_at":%s}' "$(( $(date +%s) - 3600 ))" > "$ACC/credentials.json"; }
+fresh_token()   { printf '{"access_token":"tok","refresh_token":"r","scope":"Mail.ReadWrite Contacts.ReadWrite","expires_at":%s}' "$(( $(date +%s) + 3600 ))" > "$ACC/credentials.json"; }
+expired_token() { printf '{"access_token":"tok","refresh_token":"r","scope":"Mail.ReadWrite Contacts.ReadWrite","expires_at":%s}' "$(( $(date +%s) - 3600 ))" > "$ACC/credentials.json"; }
 fresh_token
 
 run() {  # run <script> [args...] - OUTLOOK_READ_ONLY comes from the caller's environment
@@ -98,6 +99,9 @@ MAIL_READ="inbox unread focused sent from search read preview aliases drafts fla
 MAIL_WRITE="draft mddraft reply update mdreply followup forward send signature markread markunread flag unflag categorize mkcategory rccategory rmcategory junk notjunk delete archive move batch-move bulk-move mkdir rename rmdir attach"
 CAL_READ="events today week read calendars day search free"
 CAL_WRITE="create invite quick update delete cancel respond"
+# Contacts send nothing, but a write is still a write: read-only mode refuses it.
+CON_READ="list search get folders duplicates"
+CON_WRITE="create update delete move folder-create categorise"
 
 # Message IDs over 100 characters pass through resolve_message_id untouched.
 LONG_ID="MSG$(printf 'm%.0s' $(seq 1 110))"
@@ -108,6 +112,9 @@ eq "every mail verb is classed as read or write" \
    "$(words_sorted "$MAIL_READ $MAIL_WRITE" | tr '\n' ' ')" "$(dispatch_verbs "$MAIL" | tr '\n' ' ')"
 eq "every calendar verb is classed as read or write" \
    "$(words_sorted "$CAL_READ $CAL_WRITE" | tr '\n' ' ')" "$(dispatch_verbs "$CAL" | tr '\n' ' ')"
+eq "every contacts verb is classed as read or write" \
+   "$(words_sorted "$CON_READ $CON_WRITE" | tr '\n' ' ')" "$(dispatch_verbs "$CON" | tr '\n' ' ')"
+eq "no contacts verb is classed as both" "" "$(words_sorted "$CON_READ" "$CON_WRITE" | uniq -d | tr '\n' ' ')"
 eq "no mail verb is classed as both" "" "$(words_sorted "$MAIL_READ" "$MAIL_WRITE" | uniq -d | tr '\n' ' ')"
 eq "no calendar verb is classed as both" "" "$(words_sorted "$CAL_READ" "$CAL_WRITE" | uniq -d | tr '\n' ' ')"
 
@@ -115,6 +122,7 @@ eq "no calendar verb is classed as both" "" "$(words_sorted "$CAL_READ" "$CAL_WR
 script_read_verbs() { sed -n 's/^READ_ONLY_VERBS=(\(.*\))$/\1/p' "$1" | tr ' ' '\n' | grep . | sort | tr '\n' ' '; }
 eq "outlook-mail.sh allows exactly the mail read verbs" "$(words_sorted "$MAIL_READ" | tr '\n' ' ')" "$(script_read_verbs "$MAIL")"
 eq "outlook-calendar.sh allows exactly the calendar read verbs" "$(words_sorted "$CAL_READ" | tr '\n' ' ')" "$(script_read_verbs "$CAL")"
+eq "outlook-contacts.sh allows exactly the contacts read verbs" "$(words_sorted "$CON_READ" | tr '\n' ' ')" "$(script_read_verbs "$CON")"
 
 # A verb classed as read makes no write call in its own branch of the dispatch.
 writes_in_branch() {  # writes_in_branch <script> <verb>
@@ -124,6 +132,7 @@ writes_in_branch() {  # writes_in_branch <script> <verb>
 }
 for verb in $MAIL_READ; do eq "mail read verb $verb makes no write call" "" "$(writes_in_branch "$MAIL" "$verb")"; done
 for verb in $CAL_READ; do eq "calendar read verb $verb makes no write call" "" "$(writes_in_branch "$CAL" "$verb")"; done
+for verb in $CON_READ; do eq "contacts read verb $verb makes no write call" "" "$(writes_in_branch "$CON" "$verb")"; done
 eq "the write-call scan finds mail send's POST" "1" "$(writes_in_branch "$MAIL" send | grep -c .)"
 
 ########################################
@@ -145,6 +154,13 @@ for verb in $CAL_WRITE; do
     eq "read-only: calendar $verb makes no request" "0" "$(requests)"
 done
 
+for verb in $CON_WRITE; do
+    out=$(run "$CON" "$verb" AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA --name x --folder y); rc=$?
+    eq "read-only: contacts $verb exits non-zero" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
+    has "read-only: contacts $verb says why" "Refused: OUTLOOK_READ_ONLY is set" "$out"
+    eq "read-only: contacts $verb makes no request" "0" "$(requests)"
+done
+
 # --account before the verb is still gated on the verb.
 out=$(run "$MAIL" --account default send AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA); rc=$?
 eq "read-only: --account default send is refused" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
@@ -163,6 +179,10 @@ done
 for verb in $CAL_READ; do
     out=$(run "$CAL" "$verb")
     lacks "read-only: calendar $verb still runs" "Refused: OUTLOOK_READ_ONLY" "$out"
+done
+for verb in $CON_READ; do
+    out=$(run "$CON" "$verb")
+    lacks "read-only: contacts $verb still runs" "Refused: OUTLOOK_READ_ONLY" "$out"
 done
 out=$(run "$MAIL")
 lacks "read-only: the usage text still prints" "Refused" "$out"
