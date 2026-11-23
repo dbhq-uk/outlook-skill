@@ -10,7 +10,7 @@
 # What this pins: an account without Contacts.ReadWrite is refused before any
 # request, listings page through @odata.nextLink, create and update send the
 # right body, move is create then delete and never deletes when the create
-# fails, duplicates finds a shared address or name, and categorise edits the
+# fails, duplicates finds a shared address, name or phone number, the Other phone is read, written and moved, and categorise edits the
 # contact's own category list.
 #
 # The literal '$skip' and '$top' strings are Graph query parameters (SC2016).
@@ -144,7 +144,7 @@ granted
 ########################################
 out=$(con list)
 eq "list shows all 3 contacts across two pages" "3" "$(printf '%s\n' "$out" | grep -c '^\[[0-9]*\] ')"
-has "list shows the row" "Ada Lovelace | ada@example.com | Analytical Co | Blue | Contacts" "$out"
+has "list shows the row" "Ada Lovelace | ada@example.com | - | Analytical Co | Blue | Contacts" "$out"
 has "list prints a short ID" "$(cid LISTONE0000000001AA= | tail -c 20)" "$out"
 eq "list follows the next page" "1" "$(grep -c 'contacts?.*skip=2' "$FAKE_CURL_LOG")"
 eq "list asks for the main folder by default" "1" "$(head -1 "$FAKE_CURL_LOG" | grep -c 'GET https://graph.microsoft.com/v1.0/me/contacts?')"
@@ -189,7 +189,7 @@ has "search says when nothing matches" "No contacts found." "$out"
 FULL=$(cid LISTTWO0000000002AA=)
 contact "$FULL" "Alan Turing" alan@example.com "Bletchley Ltd" > "$FAKE_CONTACT"
 out=$(con get "$(printf '%s' "$FULL" | tail -c 20)")
-eq "get resolves a short ID" "1" "$(grep -c "GET https://graph.microsoft.com/v1.0/me/contacts/$FULL\$" "$FAKE_CURL_LOG")"
+eq "get resolves a short ID" "1" "$(grep -c "GET https://graph.microsoft.com/v1.0/me/contacts/$FULL?" "$FAKE_CURL_LOG")"
 eq "get prints the contact as JSON" "Alan Turing" "$(printf '%s' "$out" | jq -r .displayName)"
 out=$(con get ZZZZnotanid); rc=$?
 eq "get with an unknown short ID fails" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
@@ -352,6 +352,74 @@ out=$(con search "person 599")
 has "search works on a mailbox past the 128 KB argument cap" "Person 599" "$out"
 lacks "search past the cap raises no argument error" "Argument list too long" "$out"
 printf '%s' "$saved_folders" > "$FAKE_FOLDERS"
+
+########################################
+# The Other phone: Graph has no field for it, so it is read and written as the
+# extended property String 0x3A1F (returned with a lower-case id).
+########################################
+EXPAND_ENC="expand=singleValueExtendedProperties(\$filter=id%20eq%20'String%200x3A1F')"
+OTHER_ID=$(cid OTHERONLY0000000001AA=)
+printf '{"value":[%s,%s]}' \
+    "{\"id\":\"$OTHER_ID\",\"displayName\":\"Otto Only\",\"emailAddresses\":[],\"parentFolderId\":\"FOLDER1\",\"singleValueExtendedProperties\":[{\"id\":\"String 0x3a1f\",\"value\":\"+44 7700 900111\"}]}" \
+    "{\"id\":\"$(cid CLEARED00000000002AA=)\",\"displayName\":\"Clara Cleared\",\"emailAddresses\":[],\"mobilePhone\":\"07700 900222\",\"businessPhones\":[\"01632 960333\"],\"homePhones\":[\"01632 960444\"],\"parentFolderId\":\"FOLDER1\",\"singleValueExtendedProperties\":[{\"id\":\"String 0x3a1f\",\"value\":\"\"}]}" > "$FAKE_F1_PAGE1"
+printf '{"value":[]}' > "$FAKE_F2"
+out=$(con list)
+has "list asks for the Other phone" "$EXPAND_ENC" "$(cat "$FAKE_CURL_LOG")"
+has "list shows a contact whose only number is Other" "Otto Only |" "$out"
+has "list prints the Other number in the phone column" "Otto Only | - | +44 7700 900111 | - | - | Contacts" "$out"
+has "list prints mobile first, then business, then home" "Clara Cleared | - | 07700 900222, 01632 960333, 01632 960444 |" "$out"
+lacks "list leaves out an emptied Other phone" "960444, " "$out"
+out=$(con search otto)
+has "search asks for the Other phone" "$EXPAND_ENC" "$(cat "$FAKE_CURL_LOG")"
+has "search shows a contact whose only number is Other" "Otto Only | - | +44 7700 900111" "$out"
+
+contact "$OTHER_ID" "Otto Only" otto@example.com "" > "$FAKE_CONTACT"
+jq -c '. + {singleValueExtendedProperties: [{id: "String 0x3a1f", value: "+44 7700 900111"}]}' "$FAKE_CONTACT" > "$FAKE_CONTACT.new" && mv "$FAKE_CONTACT.new" "$FAKE_CONTACT"
+out=$(con get "$OTHER_ID")
+has "get asks for the Other phone" "$EXPAND_ENC" "$(cat "$FAKE_CURL_LOG")"
+eq "get shows otherPhone" "+44 7700 900111" "$(printf '%s' "$out" | jq -r .otherPhone)"
+eq "get hides the extended property" "false" "$(printf '%s' "$out" | jq 'has("singleValueExtendedProperties")')"
+contact "$OTHER_ID" "Otto Only" otto@example.com "" > "$FAKE_CONTACT"
+eq "get shows otherPhone as null when there is none" "null" "$(con get "$OTHER_ID" | jq -c .otherPhone)"
+
+# Create and update write the extended property.
+out=$(con create --name "Pat Other" --other-phone "01632 960555")
+eq "create body: the Other phone is an extended property" "String 0x3A1F|01632 960555" \
+   "$(body | jq -r '.singleValueExtendedProperties[0] | [.id, .value] | join("|")')"
+out=$(con create --name "Pat Plain")
+eq "create body: no Other phone unless given" "false" "$(body | jq 'has("singleValueExtendedProperties")')"
+out=$(con update "$OTHER_ID" --other-phone "07700 900666")
+eq "update sends only the Other phone" "singleValueExtendedProperties" "$(body | jq -r 'keys | join(",")')"
+eq "update body: the Other phone value" "String 0x3A1F|07700 900666" \
+   "$(body | jq -r '.singleValueExtendedProperties[0] | [.id, .value] | join("|")')"
+out=$(con update "$OTHER_ID" --other-phone "")
+eq "update --other-phone \"\" clears it with an empty value" "String 0x3A1F|" \
+   "$(body | jq -r '.singleValueExtendedProperties[0] | [.id, .value] | join("|")')"
+out=$(con update "$OTHER_ID" --other-phone); rc=$?
+eq "--other-phone with no value is refused" "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
+
+# Move carries it to the copy, and leaves no otherPhone field behind.
+jq -c '. + {singleValueExtendedProperties: [{id: "String 0x3a1f", value: "+44 7700 900111"}]}' "$FAKE_CONTACT" > "$FAKE_CONTACT.new" && mv "$FAKE_CONTACT.new" "$FAKE_CONTACT"
+out=$(con move "$OTHER_ID" --folder Clients)
+has "move reads the Other phone" "$EXPAND_ENC" "$(cat "$FAKE_CURL_LOG")"
+eq "move copies the Other phone to the new contact" "String 0x3A1F|+44 7700 900111" \
+   "$(body | jq -r '.singleValueExtendedProperties[0] | [.id, .value] | join("|")')"
+eq "move does not send otherPhone as a field" "false" "$(body | jq 'has("otherPhone")')"
+contact "$OTHER_ID" "Otto Only" otto@example.com "" > "$FAKE_CONTACT"
+out=$(con move "$OTHER_ID" --folder Clients)
+eq "move sends no extended property when there is no Other phone" "false" "$(body | jq 'has("singleValueExtendedProperties")')"
+
+# Duplicates: a shared number is found whichever way it is written and
+# whichever slot holds it.
+printf '{"value":[%s,%s,%s]}' \
+    "{\"id\":\"$(cid PHONEONE000000001AA=)\",\"displayName\":\"Pia Phone\",\"emailAddresses\":[],\"mobilePhone\":\"07700 900777\",\"parentFolderId\":\"FOLDER1\"}" \
+    "{\"id\":\"$(cid PHONETWO000000002AA=)\",\"displayName\":\"P Phoneman\",\"emailAddresses\":[],\"parentFolderId\":\"FOLDER1\",\"singleValueExtendedProperties\":[{\"id\":\"String 0x3a1f\",\"value\":\"+44 7700 900777\"}]}" \
+    "{\"id\":\"$(cid PHONETHR000000003AA=)\",\"displayName\":\"Quentin Quiet\",\"emailAddresses\":[],\"mobilePhone\":\"07700 900888\",\"parentFolderId\":\"FOLDER1\"}" > "$FAKE_F1_PAGE1"
+out=$(con duplicates)
+has "duplicates asks for the Other phone" "$EXPAND_ENC" "$(cat "$FAKE_CURL_LOG")"
+has "duplicates reports a shared number" "same phone: 7700900777" "$out"
+has "duplicates lists both holders of the number" "P Phoneman" "$out"
+lacks "duplicates leaves out a number held once" "Quentin Quiet" "$out"
 
 ########################################
 # A Graph error is reported and the command exits non-zero.

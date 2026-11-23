@@ -103,8 +103,8 @@ command accepts. A message keeps its ID when it moves to another folder.
 
 **Contacts** (`outlook-contacts.sh`; none of it sends mail)
 - `list [--folder <name|id>] [--top N] [--sort name|company|modified]`, `search <text>`, `get <id>`: read, with short IDs
-- `folders`, `duplicates`: contact folders; likely duplicates by address or name, read-only
-- `create`, `update <id>` with `--name --given --surname --email --mobile --business-phone --home-phone --company --title --notes --category`: add or change one
+- `folders`, `duplicates`: contact folders; likely duplicates by address, name or phone, read-only
+- `create`, `update <id>` with `--name --given --surname --email --mobile --business-phone --home-phone --other-phone --company --title --notes --category`: add or change one
 - `delete <id>`: removes it; `move <id> --folder <f>`: copy then delete; `categorise <id> --add|--remove <c>`
 - `folder-create <name> [--parent <f>]`: a new contact folder
 

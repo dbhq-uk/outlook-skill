@@ -253,14 +253,14 @@ matches two contacts is refused, and the full ID is printed instead.
 ```bash
 $K list [--folder <name|id>] [--top N] [--sort name|company|modified]   # default 50, main Contacts folder, by name
 $K search <text>        # name, email or company, in every folder, ignoring case
-$K get <id>             # all of Graph's fields, as JSON
+$K get <id>             # all of Graph's fields, as JSON, plus otherPhone
 $K folders              # every contact folder, children as Parent/Child, with IDs
-$K duplicates           # read-only: contacts sharing an email address or a name (word order ignored)
+$K duplicates           # read-only: contacts sharing an email address, a name (word order ignored) or a phone number
 ```
 
 ```bash
 $K create --name "Ada Lovelace" --email ada@example.com --email ada@example.org \
-    --mobile "+44 7700 900000" --business-phone "01632 960000" --home-phone "01632 960001" \
+    --mobile "+44 7700 900000" --business-phone "01632 960000" --home-phone "01632 960001" --other-phone "01632 960002" \
     --company "Analytical Co" --title "Engineer" --notes "Met at a talk" \
     --category Blue --category Clients [--folder <name|id>] \
     [--street "1 High Street" --town Exampletown --postcode "AB1 2CD" --country "United Kingdom"]
@@ -276,6 +276,13 @@ $K categorise <id> --add <category> | --remove <category>
 - `update` sends only the flags given. `--email`, `--business-phone`, `--home-phone` and
   `--category` replace the whole list. An empty value (`--company ""`) clears a field. To change
   folder use `move`.
+- Listings print one row per contact: `[n] id | name | emails | phones | company | categories |
+  folder`. `phones` is mobile first, then business, home and Other, joined with `, `, or `-` when
+  there are none, for example `07700 900123, 01632 960000`.
+- The Other phone is not a field of Graph's contact resource. It is the MAPI property
+  `String 0x3A1F`, which every read expands and shows as `otherPhone`. `--other-phone <number>`
+  writes it on `create` and `update`, `--other-phone ""` clears it, and `move` carries it across.
+  `duplicates` compares phone numbers by their digits, so `07700 900123` matches `+44 7700 900123`.
 - `delete` prints the name and addresses of what it deleted.
 - `move` has no Graph call behind it: it copies the contact into the target folder and deletes the
   original only once the copy exists. If the copy fails, the original is untouched. The new ID is

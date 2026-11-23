@@ -50,7 +50,7 @@ usage() {
     echo "  search <text>              Find contacts by name, email or company, in every folder"
     echo "  get <id>                   Everything Graph holds for one contact, as JSON"
     echo "  folders                    List contact folders"
-    echo "  duplicates                 Report likely duplicates (same email or same name). Changes nothing"
+    echo "  duplicates                 Report likely duplicates (same email, name or phone). Changes nothing"
     echo
     echo "Creating and changing:"
     echo "  create [fields]            Create a contact"
@@ -68,6 +68,7 @@ usage() {
     echo "  --email <address>      (repeat for more; on update they replace the list)"
     echo "  --mobile <number>  --phone <number> (same as --mobile)"
     echo "  --business-phone <number>  --home-phone <number>   (repeatable)"
+    echo "  --other-phone <number> (Outlook's \"Other\" phone; on update \"\" clears it)"
     echo "  --company <text>  --title <text>  --notes <text>"
     echo "  --street <text>  --town <text>  --postcode <text>  --country <text>"
     echo "                         (the business address; on update, give every part to keep)"
@@ -161,7 +162,26 @@ die_on_error() {
 urlencode() { jq -rn --arg s "$1" '$s|@uri'; }
 
 # The fields every listing asks for.
-CONTACT_SELECT="id,displayName,givenName,surname,emailAddresses,companyName,jobTitle,categories,parentFolderId,lastModifiedDateTime"
+CONTACT_SELECT="id,displayName,givenName,surname,emailAddresses,mobilePhone,businessPhones,homePhones,companyName,jobTitle,categories,parentFolderId,lastModifiedDateTime"
+
+# Outlook's "Other" phone is not a field of Graph's contact resource. It is the
+# MAPI property PidTagOtherTelephoneNumber (String 0x3A1F), so every read of
+# contacts expands it, and normalise_other turns it into a plain otherPhone.
+OTHER_PROP_ID="String 0x3A1F"
+OTHER_EXPAND="\$expand=singleValueExtendedProperties(\$filter=id%20eq%20'String%200x3A1F')"
+
+# normalise_other: a contact or an array of contacts on stdin. Adds otherPhone
+# (the number, or null when missing or empty) and drops the extended property.
+# Graph returns the id in lower case, so it is matched ignoring case.
+normalise_other() {
+    jq -c '
+        def one:
+            ((.singleValueExtendedProperties // [])
+             | map(select((.id | ascii_downcase) == "string 0x3a1f") | .value)
+             | map(select(. != null and . != "")) | .[0]) as $o
+            | del(.singleValueExtendedProperties) | . + {otherPhone: $o};
+        if type == "array" then map(one) else one end'
+}
 
 # Most contacts any one command reads. A mailbox with more than this is
 # truncated, and the command says so.
@@ -266,7 +286,8 @@ all_contacts() {
     load_folders || return 1
     while IFS=$'\t' read -r id path; do
         [ -n "$id" ] || continue
-        rows=$(fetch_all "/me/contactFolders/$id/contacts?\$top=100&\$select=$CONTACT_SELECT") || return 1
+        rows=$(fetch_all "/me/contactFolders/$id/contacts?\$top=100&\$select=$CONTACT_SELECT&$OTHER_EXPAND") || return 1
+        rows=$(printf '%s' "$rows" | normalise_other)
         # Through stdin: the list outgrows the 128 KB cap on one argument.
         out=$(printf '%s\n%s' "$out" "$rows" | jq -sc --arg f "$path" '.[0] + (.[1] | map(. + {folder: $f}))')
     done < <(printf '%s' "$FOLDERS" | jq -r '.[] | [.id, .path] | @tsv')
@@ -289,7 +310,7 @@ format_contacts() {
             ([.[].id | short_id] | group_by(.) | map(select(length > 1) | .[0])) as $clash
             | to_entries[] | .key as $i | .value as $c
             | ($c.id | short_id) as $s
-            | "[\($i + 1)] \(if ($clash | index($s)) then $c.id else $s end) | \($c.displayName // "(no name)") | \([$c.emailAddresses[]?.address] | join(", ") | if . == "" then "-" else . end) | \($c.companyName // "-") | \(($c.categories // []) | join(", ") | if . == "" then "-" else . end) | \($c.folder // "-")"
+            | "[\($i + 1)] \(if ($clash | index($s)) then $c.id else $s end) | \($c.displayName // "(no name)") | \([$c.emailAddresses[]?.address] | join(", ") | if . == "" then "-" else . end) | \([$c.mobilePhone, ($c.businessPhones // [])[], ($c.homePhones // [])[], $c.otherPhone] | map(select(. != null and . != "")) | join(", ") | if . == "" then "-" else . end) | \($c.companyName // "-") | \(($c.categories // []) | join(", ") | if . == "" then "-" else . end) | \($c.folder // "-")"
         end'
 }
 
@@ -321,7 +342,7 @@ resolve_contact_id() {
 # was given, even with an empty value, is "have"; update sends only those.
 F_EMAILS="" F_BUSINESS="" F_HOME="" F_CATS=""
 F_NAME="" F_GIVEN="" F_SURNAME="" F_MOBILE="" F_COMPANY="" F_TITLE="" F_NOTES="" F_FOLDER=""
-F_STREET="" F_TOWN="" F_POSTCODE="" F_COUNTRY="" HAVE_ADDRESS=""
+F_STREET="" F_TOWN="" F_POSTCODE="" F_COUNTRY="" HAVE_ADDRESS="" F_OTHER="" HAVE_OTHER=""
 HAVE_NAME="" HAVE_GIVEN="" HAVE_SURNAME="" HAVE_EMAILS="" HAVE_MOBILE="" HAVE_BUSINESS=""
 HAVE_HOME="" HAVE_COMPANY="" HAVE_TITLE="" HAVE_NOTES="" HAVE_CATS=""
 parse_fields() {
@@ -329,7 +350,7 @@ parse_fields() {
     while [ $# -gt 0 ]; do
         flag="$1"
         case "$flag" in
-            --name|--given|--surname|--email|--mobile|--phone|--business-phone|--home-phone|--company|--title|--notes|--category|--folder|--street|--town|--postcode|--country)
+            --name|--given|--surname|--email|--mobile|--phone|--business-phone|--home-phone|--other-phone|--company|--title|--notes|--category|--folder|--street|--town|--postcode|--country)
                 if [ $# -lt 2 ]; then
                     echo "Error: $flag needs a value." >&2
                     return 1
@@ -346,6 +367,7 @@ parse_fields() {
             --mobile|--phone) F_MOBILE="$2"; HAVE_MOBILE=1 ;;
             --business-phone) F_BUSINESS="$F_BUSINESS$2"$'\n'; HAVE_BUSINESS=1 ;;
             --home-phone)     F_HOME="$F_HOME$2"$'\n'; HAVE_HOME=1 ;;
+            --other-phone)    F_OTHER="$2"; HAVE_OTHER=1 ;;
             --company)        F_COMPANY="$2"; HAVE_COMPANY=1 ;;
             --title)          F_TITLE="$2"; HAVE_TITLE=1 ;;
             --notes)          F_NOTES="$2"; HAVE_NOTES=1 ;;
@@ -376,7 +398,8 @@ contact_body() {
         --arg hname "$HAVE_NAME" --arg hgiven "$HAVE_GIVEN" --arg hsurname "$HAVE_SURNAME" \
         --arg hemails "$HAVE_EMAILS" --arg hmobile "$HAVE_MOBILE" --arg hbusiness "$HAVE_BUSINESS" \
         --arg hhome "$HAVE_HOME" --arg hcompany "$HAVE_COMPANY" --arg htitle "$HAVE_TITLE" \
-        --arg hnotes "$HAVE_NOTES" --arg hcats "$HAVE_CATS" '
+        --arg hnotes "$HAVE_NOTES" --arg hcats "$HAVE_CATS" \
+        --arg other "$F_OTHER" --arg hother "$HAVE_OTHER" --arg oid "$OTHER_PROP_ID" '
         def lines: split("\n") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0));
         {}
         | if $hname == "1" then .displayName = $name else . end
@@ -386,6 +409,7 @@ contact_body() {
         | if $hmobile == "1" then .mobilePhone = (if $mobile == "" then null else $mobile end) else . end
         | if $hbusiness == "1" then .businessPhones = ($business | lines) else . end
         | if $hhome == "1" then .homePhones = ($home | lines) else . end
+        | if $hother == "1" then .singleValueExtendedProperties = [{id: $oid, value: $other}] else . end
         | if $hcompany == "1" then .companyName = $company else . end
         | if $htitle == "1" then .jobTitle = $title else . end
         | if $hnotes == "1" then .personalNotes = $notes else . end
@@ -399,10 +423,13 @@ describe_contact() {
 }
 
 # Remove what Graph sets itself, and the nulls, so a contact read back can be
-# created again in another folder with everything else intact.
+# created again in another folder with everything else intact. otherPhone goes
+# back to the extended property it was read from.
 strip_for_copy() {
-    jq -c '
-        with_entries(select((.key | startswith("@") or contains("@odata")) | not))
+    jq -c --arg oid "$OTHER_PROP_ID" '
+        (if (.otherPhone // "") != "" then .singleValueExtendedProperties = [{id: $oid, value: .otherPhone}] else . end)
+        | del(.otherPhone)
+        | with_entries(select((.key | startswith("@") or contains("@odata")) | not))
         | del(.id, .createdDateTime, .lastModifiedDateTime, .changeKey, .parentFolderId)
         | with_entries(select(.value != null))'
 }
@@ -432,7 +459,7 @@ case "$1" in
         esac
         page=100
         [ "$top" -lt "$page" ] && page="$top"
-        query="\$top=$page&\$orderby=$order&\$select=$CONTACT_SELECT"
+        query="\$top=$page&\$orderby=$order&\$select=$CONTACT_SELECT&$OTHER_EXPAND"
         if [ -n "$folder" ]; then
             load_folders || exit 1      # here, not in a subshell, so it is read once
             folder_id=$(resolve_folder "$folder") || exit 1
@@ -441,6 +468,7 @@ case "$1" in
             path="/me/contacts?$query"
         fi
         contacts=$(fetch_all "$path" "$top") || exit 1
+        contacts=$(printf '%s' "$contacts" | normalise_other)
         load_folders || FOLDERS="[]"
         printf '%s' "$contacts" | annotate_folder | format_contacts
         ;;
@@ -468,9 +496,9 @@ case "$1" in
             exit 1
         fi
         contact_id=$(resolve_contact_id "$2") || exit 1
-        result=$(api_call GET "/me/contacts/$contact_id")
+        result=$(api_call GET "/me/contacts/$contact_id?$OTHER_EXPAND")
         die_on_error "$result" "reading the contact"
-        printf '%s' "$result" | jq .
+        printf '%s' "$result" | normalise_other | jq .
         ;;
 
     folders)
@@ -590,8 +618,9 @@ case "$1" in
         load_folders || exit 1
         folder_id=$(resolve_folder "$target") || exit 1
         contact_id=$(resolve_contact_id "$contact_id") || exit 1
-        original=$(api_call GET "/me/contacts/$contact_id")
+        original=$(api_call GET "/me/contacts/$contact_id?$OTHER_EXPAND")
         die_on_error "$original" "reading the contact to move"
+        original=$(printf '%s' "$original" | normalise_other)
         if [ "$(printf '%s' "$original" | jq -r '.parentFolderId // empty')" = "$folder_id" ]; then
             echo "Nothing to do: the contact is already in that folder."
             exit 0
@@ -663,6 +692,8 @@ case "$1" in
         report=$(printf '%s' "$contacts" | jq -r '
             def short_id: .[-20:];
             def norm_name: ascii_downcase | gsub("[^a-z0-9 ]"; " ") | split(" ") | map(select(length > 0)) | sort | join(" ");
+            def phone_key: gsub("[^0-9]"; "") | if startswith("0044") then .[4:] elif startswith("44") then .[2:] elif startswith("0") then .[1:] else . end;
+            def phones: [.mobilePhone, (.businessPhones // [])[], (.homePhones // [])[], .otherPhone] | map(select(. != null) | phone_key | select(length >= 7)) | unique;
             def row: "    \(.id | short_id) | \(.displayName // "(no name)") | \([.emailAddresses[]?.address | select((. // "") != "")] | join(", ") | if . == "" then "-" else . end) | \(.folder // "-")";
             . as $all
             | ([$all[] | . as $c | (.emailAddresses // [])[] | select((.address // "") != "") | {key: (.address | ascii_downcase), c: $c}]
@@ -670,7 +701,9 @@ case "$1" in
             | ([$all[] | select((.displayName // "") != "") | {key: (.displayName | norm_name), c: .}]
                | map(select(.key != "")) | group_by(.key)
                | map({kind: "name", key: .[0].key, members: (map(.c) | unique_by(.id))})) as $byname
-            | ($byemail + $byname | map(select(.members | length > 1))) as $groups
+            | ([$all[] | . as $c | phones[] | {key: ., c: $c}]
+               | group_by(.key) | map({kind: "phone", key: .[0].key, members: (map(.c) | unique_by(.id))})) as $byphone
+            | ($byemail + $byname + $byphone | map(select(.members | length > 1))) as $groups
             | if ($groups | length) == 0 then "No likely duplicates found among \($all | length) contacts."
               else
                 "\($groups | length) likely duplicate group(s) among \($all | length) contacts:",
