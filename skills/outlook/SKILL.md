@@ -1,13 +1,14 @@
 ---
 name: outlook
-description: Microsoft 365 Outlook mail and calendar through Microsoft Graph - read and search the inbox, draft, reply and send, attachments, categories and folders, calendar events, invitations and free/busy. Use for "check my email", "draft an email", "reply to", "my Outlook calendar", "am I free", "book a meeting", "Microsoft 365 mail". Not for Gmail or Google Calendar, and not for PST files (use outlook-to-md).
+description: Microsoft 365 Outlook mail, calendar and contacts through Microsoft Graph - read and search the inbox, draft, reply and send, attachments, categories and folders, calendar events, invitations and free/busy, and the address book. Use for "check my email", "draft an email", "reply to", "my Outlook calendar", "am I free", "book a meeting", "add a contact", "my Outlook contacts", "tidy my contacts", "Microsoft 365 mail". Not for Gmail or Google Calendar, and not for PST files (use outlook-to-md).
 ---
 
 # outlook
 
-Microsoft 365 Outlook mail and calendar through the Microsoft Graph API. Two scripts do the
-work: `${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh` and
-`${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh`. The index below has every command. For the
+Microsoft 365 Outlook mail, calendar and contacts through the Microsoft Graph API. Three scripts
+do the work: `${CLAUDE_SKILL_DIR}/scripts/outlook-mail.sh`,
+`${CLAUDE_SKILL_DIR}/scripts/outlook-calendar.sh` and
+`${CLAUDE_SKILL_DIR}/scripts/outlook-contacts.sh`. The index below has every command. For the
 exact arguments and behaviour, read `references/commands.md`.
 
 ## Rules
@@ -50,11 +51,14 @@ show the user the From line before sending.
 **7. Setup is the user's.** If an account is not configured, or a refresh is refused because
 the sign-in has lapsed, ask the user to run `${CLAUDE_SKILL_DIR}/scripts/outlook-setup.sh`
 (add `--account <name>` for another mailbox). Do not run it yourself: it opens a browser and
-waits for a person to paste back a URL.
+waits for a person to paste back a URL. An account set up before contacts existed has not
+granted contacts access: `outlook-contacts.sh` says so and exits, and the user signs in once
+more with `outlook-setup.sh --account <name>`. Mail and calendar keep working without it.
 
 ## Command index
 
-Mail is `outlook-mail.sh <verb>`, calendar is `outlook-calendar.sh <verb>`. Add
+Mail is `outlook-mail.sh <verb>`, calendar is `outlook-calendar.sh <verb>`, contacts are
+`outlook-contacts.sh <verb>`. Add
 `--account <name>` before the verb for another mailbox. Listings print short IDs, which every
 command accepts. A message keeps its ID when it moves to another folder.
 
@@ -96,6 +100,13 @@ command accepts. A message keeps its ID when it moves to another folder.
 - `update <event-id> <field> <value> [--notify-attendees]`: subject, location, start or end
 - `cancel <event-id> [message]`: a meeting you organise; tells every attendee
 - `delete <event-id>`: removes an event that notifies nobody
+
+**Contacts** (`outlook-contacts.sh`; none of it sends mail)
+- `list [--folder <name|id>] [--top N] [--sort name|company|modified]`, `search <text>`, `get <id>`: read, with short IDs
+- `folders`, `duplicates`: contact folders; likely duplicates by address or name, read-only
+- `create`, `update <id>` with `--name --given --surname --email --mobile --business-phone --home-phone --company --title --notes --category`: add or change one
+- `delete <id>`: removes it; `move <id> --folder <f>`: copy then delete; `categorise <id> --add|--remove <c>`
+- `folder-create <name> [--parent <f>]`: a new contact folder
 
 **Accounts** (`outlook-token.sh`)
 - `list`, `status`, `test`, `refresh`, `get`: accounts, connection, a valid token

@@ -178,6 +178,29 @@ printed with their full IDs, and the short form is refused rather than guessed.
 Graph rejects a `start` later than the current `end` and an `end` earlier than the current
 `start`, so moving an event to another day means updating the safe bound first.
 
+## contacts.sh
+
+Needs `Contacts.ReadWrite`. An account set up before contacts existed has not granted it, and
+the script refuses, naming `outlook-setup.sh --account <name>`, until that account signs in
+once more. Mail and calendar are unaffected. Nothing here sends mail.
+
+| Command | Notes |
+|---|---|
+| `list [--folder <name\|id>] [--top N] [--sort name\|company\|modified]` | Default 50, from the main Contacts folder, by name. Prints a short ID, name, addresses, company, categories and folder |
+| `search <text>` | Name, email or company, in every folder, ignoring case |
+| `get <id>` | Everything Graph holds for the contact, as JSON |
+| `create [fields]` | `--name`, `--given`, `--surname`, `--email` (repeatable), `--mobile` or `--phone`, `--business-phone`, `--home-phone`, `--company`, `--title`, `--notes`, `--category` (repeatable), `--folder`. Needs a name or an address |
+| `update <id> [fields]` | Sends only the fields given. Email, phone and category flags replace the list. An empty value clears a field |
+| `delete <id>` | Says who was deleted |
+| `move <id> --folder <name\|id>` | Graph cannot move a contact, so this creates the copy, then deletes the original only if the copy worked. Prints the new ID. Photo and attachments are not copied |
+| `folders` | Every contact folder, children as `Parent/Child`, with IDs |
+| `folder-create <name> [--parent <name\|id>]` | |
+| `categorise <id> --add <category> \| --remove <category>` | Edits the contact's own category list. Warns, when it can read the master list, that a new name will show without a colour |
+| `duplicates` | Read-only. Groups of contacts that share an email address or a name (word order and punctuation ignored). Merges nothing |
+
+A folder is a name, a `Parent/Child` path or an ID. A short ID is the last 20 characters of the
+Graph ID, as listings print it.
+
 ## token.sh
 
 | Command | Notes |
@@ -200,7 +223,8 @@ Registers (or reuses) an Azure app, runs the OAuth sign-in, and writes
 [`references/setup.md`](../skills/outlook/references/setup.md).
 
 Delegated permissions requested, and the whole of what the pack can do:
-`Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`, `User.Read`, `offline_access`.
+`Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`, `Contacts.ReadWrite`, `User.Read`,
+`offline_access`.
 
 ## outlook_to_md.py
 

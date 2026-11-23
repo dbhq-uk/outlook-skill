@@ -47,10 +47,14 @@ normally type the path at all: you ask in plain language and the skill runs the 
 
 It registers an Azure app for you (or reuses one it finds) as a public client with no client
 secret, opens a sign-in (the authorisation-code flow with PKCE), and asks you to
-consent to five delegated permissions: `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`,
-`User.Read` and `offline_access`. Those are the whole of what the pack can do. Nothing there
+consent to six delegated permissions: `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`,
+`Contacts.ReadWrite`, `User.Read` and `offline_access`. Those are the whole of what the pack can do. Nothing there
 lets it read anyone else's mailbox, and nothing lets it act while you are not signed in
 beyond the refresh token's life.
+
+Contacts came later than mail and calendar. If you set up before they existed, run the same
+command once more for the account and answer `y` to "Overwrite?" to grant them; nothing else
+changes.
 
 Credentials land in `~/.dbhq/outlook/default/`, mode `600`, and never go anywhere else.
 
